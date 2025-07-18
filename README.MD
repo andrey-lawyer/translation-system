@@ -53,3 +53,20 @@ go run main.go
 # In a new terminal window/tab, run Java Backend
 cd java-backend
 ./gradlew bootRun
+
+## How to Test
+
+Use `grpcurl` to test the Go Translator directly:
+
+```bash
+grpcurl -plaintext -d '{"text":"hello world","langs":["ru","uk"]}' localhost:6565 translator.TranslatorService/Translate
+```
+```json
+{
+  "translations": {
+    "en": "hello world",
+    "ru": "привет мир",
+    "uk": "привіт світ"
+  }
+}
+```
