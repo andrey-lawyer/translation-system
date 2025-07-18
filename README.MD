@@ -42,7 +42,7 @@ translation-system/
 From the project root, run:
 
 ```bash
-protoc --go_out=go-translator/translatorpb --go-grpc_out=go-translator/translatorpb proto/translation.proto
+protoc --go_out=. --go-grpc_out=. proto/translation.proto
 ./gradlew generateProto
 ```
 
