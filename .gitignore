@@ -1,0 +1,36 @@
+# IDE files (IntelliJ IDEA, VSCode, etc)
+.idea/
+.vscode/
+*.iml
+*.log
+
+# OS generated files
+.DS_Store
+Thumbs.db
+
+# Java build output and temp files
+java-backend/build/
+java-backend/.gradle/
+java-backend/out/
+java-backend/.idea/
+
+# Gradle wrapper jar (optional)
+java-backend/gradle/wrapper/gradle-wrapper.jar
+
+# Go build output and cache
+go-translator/bin/
+go-translator/pkg/
+go-translator/go.mod.cache
+go-translator/go.sum
+go-translator/*.exe
+go-translator/*.exe~
+
+# Generated protobuf files (optional to ignore if generated during build)
+java-backend/build/generated/
+go-translator/translatorpb/
+
+# Logs
+*.log
+
+# Environment config files (if any)
+.env

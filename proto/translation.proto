@@ -1,0 +1,28 @@
+syntax = "proto3";
+
+package translator;
+
+option go_package = "go-translator/translatorpb";
+
+
+// ===== REQUEST =====
+message TranslateRequest {
+  string text = 1;             // original text (e.g., "hello world")
+  repeated string langs = 2;   // target languages for translation (e.g., ["uk", "ru"])
+}
+
+// ===== RESPONSE =====
+message TranslateResponse {
+  map<string, string> translations = 1; // {"en": "...", "uk": "...", "ru": "..."}
+}
+
+// ===== SERVICE =====
+service TranslatorService {
+  rpc Translate(TranslateRequest) returns (TranslateResponse);
+}
+
+
+// --for go--
+//    protoc --go_out=. --go-grpc_out=. proto/translation.proto
+
+

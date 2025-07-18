@@ -1,0 +1,76 @@
+//    ./gradlew generateProto                      -generate proto-
+//   ./gradlew clean build --refresh-dependencies  -update dependencies-
+
+//   grpcurl -plaintext -d '{"text":"hello world","langs":["ru","uk"]}' localhost:6565 translator.TranslatorService/Translate
+
+plugins {
+	id 'java'
+	id 'groovy'
+	id 'org.springframework.boot' version '3.5.3'
+	id 'io.spring.dependency-management' version '1.1.7'
+	id 'com.google.protobuf' version '0.9.4'
+	id "io.github.lognet.grpc-spring-boot" version '5.2.0'
+}
+
+group = 'com'
+version = '0.0.1-SNAPSHOT'
+
+java {
+	toolchain {
+		languageVersion = JavaLanguageVersion.of(21)
+	}
+}
+
+repositories {
+	mavenCentral()
+}
+
+dependencies {
+	implementation 'org.springframework.boot:spring-boot-starter-web'
+	implementation 'org.apache.groovy:groovy'
+
+	developmentOnly 'org.springframework.boot:spring-boot-devtools'
+	testImplementation 'org.springframework.boot:spring-boot-starter-test'
+	testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+
+	implementation 'io.grpc:grpc-protobuf:1.64.0'
+	implementation 'io.grpc:grpc-stub:1.64.0'
+	implementation 'com.google.protobuf:protobuf-java:3.25.3'
+
+	implementation 'io.github.lognet:grpc-spring-boot-starter:5.2.0'
+}
+
+sourceSets {
+	main {
+        proto {
+            srcDirs = ['../proto'] // путь к твоим .proto-файлам
+        }
+        java {
+            srcDirs += 'build/generated/source/proto/main/java'
+            srcDirs += 'build/generated/source/proto/main/grpc'
+        }
+    }
+}
+
+
+protobuf {
+	protoc {
+		artifact = "com.google.protobuf:protoc:3.25.3"
+	}
+	plugins {
+		grpc {
+			artifact = "io.grpc:protoc-gen-grpc-java:1.64.0"
+		}
+	}
+	generateProtoTasks {
+		all().forEach { task ->
+			task.plugins {
+				grpc {}
+			}
+		}
+	}
+}
+
+tasks.named('test') {
+	useJUnitPlatform()
+}
