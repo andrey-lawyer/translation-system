@@ -21,13 +21,13 @@ java-backend/gradle/wrapper/gradle-wrapper.jar
 go-translator/bin/
 go-translator/pkg/
 go-translator/go.mod.cache
-go-translator/go.sum
+#go-translator/go.sum
 go-translator/*.exe
 go-translator/*.exe~
 
 # Generated protobuf files (optional to ignore if generated during build)
 java-backend/build/generated/
-go-translator/translatorpb/
+#go-translator/translatorpb/
 
 # Logs
 *.log

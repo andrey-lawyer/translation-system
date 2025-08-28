@@ -1,134 +1,128 @@
-# Translation System (Java + Go)
+## Translation System (Java + Go)
 
-This project implements a simple translation microservice system using gRPC with two components:
+A simple **translation microservice system** using **gRPC**, with two main components:
 
-- **Java Backend** — main backend service that handles client requests and delegates translation calls to the Go service.
-- **Go Translator** — gRPC service that performs mock translations.
+* **Java Backend** – handles client requests and delegates translations to Go service.
+* **Go Translator** – gRPC service performing translations (currently mock).
 
 ---
 
 ## Project Structure
 
+```
 translation-system/
-├── java-backend/ # Java Spring Boot backend with gRPC client and server
-├── go-translator/ # Go gRPC translation service
-└── proto/ # Protobuf definitions shared by both services
-
+├── java-backend/     # Spring Boot backend with gRPC client
+├── go-translator/    # Go gRPC translation service
+└── proto/            # Protobuf definitions shared by both services
+```
 
 ---
 
-## How it works
+## How It Works
 
-1. Client sends a translation request (English text + target languages) to the Java backend.
-2. Java backend forwards the request to the Go translator service via gRPC.
-3. Go translator returns mock translated texts.
-4. Java backend returns the combined translations to the client.
+1. Client sends a translation request (text + target languages) to the **Java backend**.
+2. Java backend forwards request to **Go translator** via gRPC.
+3. Go translator returns translated texts.
+4. Java backend responds to the client with combined translations.
 
 ---
 
 ## Prerequisites
 
-- Java 17+ and Gradle for the Java backend
-- Go 1.18+ for the Go translator
-- `protoc` compiler with Go and Java plugins installed
-- `grpcurl` or any gRPC client tool to test the services
+* **Java 17+** and **Gradle** (for Java backend)
+* **Go 1.18+** (for Go translator)
+* `protoc` compiler with **Go** and **Java** plugins
+* `grpcurl` (optional, for testing gRPC services)
 
 ---
 
 ## Setup & Run
 
-### Generate protobuf code (from the repository root)
+### 1. Generate Protobuf Code
 
-- For Go (go-translator):
+#### Go (go-translator)
 
-# Install plugins (once)
+```bash
+# Install protoc plugins (once)
 go install google.golang.org/protobuf/cmd/protoc-gen-go@latest
 go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@latest
-# Ensure that %GOPATH%\bin is in PATH (Windows)
 
-# Generate code
-
-```bash
-protoc --go_out=go-translator/translatorpb --go-grpc_out=go-translator/translatorpb proto/translation.proto
-```
-# Alternative with relative paths:
-
-```bash
-protoc --go_out=paths=source_relative:go-translator/translatorpb --go-grpc_out=paths=source_relative:go-translator/translatorpb proto/translation.proto
+# Generate Go code
+protoc --go_out=paths=source_relative:go-translator/translatorpb \
+       --go-grpc_out=paths=source_relative:go-translator/translatorpb \
+       proto/translation.proto
 ```
 
-- For Java (java-backend):
-
-# Generate code
+#### Java (java-backend)
 
 ```bash
+# From project root
 ./java-backend/gradlew -p java-backend generateProto
-```
 
-or
-
-```bash
+# Or
 cd java-backend
 ./gradlew generateProto
 ```
 
+---
 
-# Run Go Translator
+### 2. Run Services Locally
+
+#### Go Translator
+
+```bash
 cd go-translator
 go run main.go
+```
 
-# In a new terminal window/tab, run Java Backend
+#### Java Backend (in a new terminal)
+
+```bash
 cd java-backend
 ./gradlew bootRun
+```
 
 ---
 
-## Docker: run the full project
+## Docker: Run Full Project
 
-Requirements: Docker Desktop (or compatible) with docker compose.
+Requirements: Docker Desktop or compatible.
 
-1) From repository root:
+### 1. Build and start all services
+
 ```bash
 docker compose up --build
 ```
 
-2) After start, check:
-- React (UI): http://localhost:3000
-- Java REST API: http://localhost:8080/api/translate
-- Go gRPC (inside docker network): go-translator:6565 (Java uses this name)
+### 2. Check services
 
-3) Stop:
+* React UI: [http://localhost:3000](http://localhost:3000)
+* Java REST API: [http://localhost:8080/api/translate](http://localhost:8080/api/translate)
+* Go gRPC service (inside Docker network): `go-translator:6565`
+
+### 3. Stop services
+
 ```bash
 docker compose down
 ```
 
-4) Useful commands:
+### 4. Useful Docker commands
+
 ```bash
 docker compose build java-backend
 docker compose logs -f java-backend
 ```
 
-What compose does:
-- Runs 3 containers: react-front (Nginx, port 3000), java-backend (Spring Boot, port 8080), go-translator (gRPC, port 6565).
-- react-front proxies /api/ to java-backend:8080/api/.
-- java-backend calls Go using GO_TRANSLATOR_HOST=go-translator and GO_TRANSLATOR_PORT=6565.
+> Notes:
+>
+> * Java protobuf code is generated during `java-backend` Docker build.
+> * Go protobuf code already exists in `go-translator/translatorpb`.
 
-Environment variables (see docker-compose.yml):
-- GO_TRANSLATOR_HOST (default go-translator)
-- GO_TRANSLATOR_PORT (default 6565)
-- FRONTEND_ORIGIN (default http://localhost:3000, for CORS)
-- REACT_APP_API_URL (frontend build arg, default /api/translate)
+---
 
-Notes:
-
-- Java protobuf generation happens inside the java-backend image during build. Go protobuf code already exists in go-translator/translatorpb.
-
-
-## How to Test
+## Testing
 
 ### gRPC (Go Translator)
-
-Use `grpcurl` to call the Go service directly:
 
 ```bash
 grpcurl -plaintext \
@@ -150,8 +144,6 @@ Expected response:
 
 ### REST (Java Backend)
 
-Use `curl` to hit the REST endpoint:
-
 ```bash
 curl -X POST http://localhost:8080/api/translate \
   -H "Content-Type: application/json" \
@@ -161,3 +153,14 @@ curl -X POST http://localhost:8080/api/translate \
     "langs": ["ru", "uk"]
   }'
 ```
+
+---
+
+## Environment Variables (Docker Compose)
+
+| Variable             | Default                 | Description                 |
+| -------------------- | ----------------------- | --------------------------- |
+| `GO_TRANSLATOR_HOST` | `go-translator`         | Hostname for Java → Go gRPC |
+| `GO_TRANSLATOR_PORT` | `6565`                  | Port for Go gRPC service    |
+| `FRONTEND_ORIGIN`    | `http://localhost:3000` | For CORS                    |
+| `REACT_APP_API_URL`  | `/api/translate`        | Frontend build arg          |
