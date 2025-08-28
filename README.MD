@@ -1,4 +1,4 @@
-## Translation System (Java + Go)
+## Translation System (JS + Java + Go)
 
 A simple **translation microservice system** using **gRPC**, with two main components:
 
