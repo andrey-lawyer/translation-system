@@ -3,7 +3,7 @@
 A simple **translation microservice system** using **gRPC**, with two main components:
 
 * **Java Backend** – handles client requests and delegates translations to Go service.
-* **Go Translator** – gRPC service performing translations (currently mock).
+* **Go Translator** – gRPC service performing translations.
 
 ---
 
