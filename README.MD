@@ -2,6 +2,7 @@
 
 A simple **translation microservice system** using **gRPC**, with two main components:
 
+* **React Frontend** – UI that calls Java REST API.
 * **Java Backend** – handles client requests and delegates translations to Go service.
 * **Go Translator** – gRPC service performing translations.
 
@@ -11,6 +12,7 @@ A simple **translation microservice system** using **gRPC**, with two main compo
 
 ```
 translation-system/
+├── react-front/      # React frontend
 ├── java-backend/     # Spring Boot backend with gRPC client
 ├── go-translator/    # Go gRPC translation service
 └── proto/            # Protobuf definitions shared by both services
@@ -29,6 +31,7 @@ translation-system/
 
 ## Prerequisites
 
+* **Node.js + npm** (for React frontend)
 * **Java 17+** and **Gradle** (for Java backend)
 * **Go 1.18+** (for Go translator)
 * `protoc` compiler with **Go** and **Java** plugins
@@ -67,6 +70,14 @@ cd java-backend
 ---
 
 ### 2. Run Services Locally
+
+#### React Frontend
+
+```bash
+cd react-front
+npm install
+npm start
+```
 
 #### Go Translator
 
