@@ -37,7 +37,6 @@ dependencies {
 	implementation 'io.grpc:grpc-stub:1.64.0'
 	implementation 'com.google.protobuf:protobuf-java:3.25.3'
 
-	implementation 'io.github.lognet:grpc-spring-boot-starter:5.2.0'
 }
 
 sourceSets {
@@ -73,4 +72,12 @@ protobuf {
 
 tasks.named('test') {
 	useJUnitPlatform()
+}
+
+// Ensure proto generation happens before Java/Groovy compilation
+tasks.named('compileJava') {
+    dependsOn 'generateProto'
+}
+tasks.named('compileGroovy') {
+    dependsOn 'generateProto'
 }

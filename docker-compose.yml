@@ -1,0 +1,48 @@
+services:
+  go-translator:
+    build:
+      context: ./go-translator
+    image: translation-system/go-translator:local
+    container_name: go-translator
+    ports:
+      - "6565:6565"
+    networks:
+      - trans-net
+
+  java-backend:
+    build:
+      context: .
+      dockerfile: java-backend/Dockerfile
+    image: translation-system/java-backend:local
+    container_name: java-backend
+    depends_on:
+      - go-translator
+    environment:
+      - GO_TRANSLATOR_HOST=go-translator
+      - GO_TRANSLATOR_PORT=6565
+      - FRONTEND_ORIGIN=http://localhost:3000
+    ports:
+      - "8080:8080"
+      - "6566:6566"
+    networks:
+      - trans-net
+
+  react-front:
+    build:
+      context: ./react-front
+      args:
+        REACT_APP_API_URL: /api/translate
+    image: translation-system/react-front:local
+    container_name: react-front
+    depends_on:
+      - java-backend
+    ports:
+      - "3000:80"
+    networks:
+      - trans-net
+
+networks:
+  trans-net:
+    driver: bridge
+
+

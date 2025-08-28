@@ -5,6 +5,7 @@ import io.grpc.ManagedChannelBuilder;
 import translator.TranslatorServiceGrpc;
 import translator.Translation;
 
+
 class GoTranslatorClient {
 
     private final TranslatorServiceGrpc.TranslatorServiceBlockingStub stub;
@@ -18,21 +19,20 @@ class GoTranslatorClient {
 
         this.stub = TranslatorServiceGrpc.newBlockingStub(channel);
 
+
         System.out.println("[GoTranslatorClient] gRPC channel created: " + host + ":" + port);
     }
 
     // Sends a translate request to the Go service and returns the response
-    Translation.TranslateResponse translate(String text, List<String> langs) {
-        System.out.println("[GoTranslatorClient] Sending request to Go service: text = " + text + ", langs = " + langs);
-
+    Translation.TranslateResponse translate(String text, String fromLang, List<String> langs) {
         Translation.TranslateRequest request = Translation.TranslateRequest.newBuilder()
                 .setText(text)
+                .setFromLang(fromLang)
                 .addAllLangs(langs)
                 .build();
 
         Translation.TranslateResponse response = stub.translate(request);
 
-        System.out.println("[GoTranslatorClient] Received response from Go service: " + response);
 
         return response;
     }

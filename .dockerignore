@@ -1,0 +1,10 @@
+# Исключаем каталоги сборки и кеши
+java-backend/build
+java-backend/.gradle
+java-backend/.idea
+*.iml
+
+# Скрытые системные файлы
+.git
+.gitignore
+.DS_Store
