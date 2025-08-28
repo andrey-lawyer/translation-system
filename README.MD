@@ -122,3 +122,42 @@ Environment variables (see docker-compose.yml):
 Notes:
 
 - Java protobuf generation happens inside the java-backend image during build. Go protobuf code already exists in go-translator/translatorpb.
+
+
+## How to Test
+
+### gRPC (Go Translator)
+
+Use `grpcurl` to call the Go service directly:
+
+```bash
+grpcurl -plaintext \
+  -d '{"text":"hello world","fromLang":"en","langs":["ru","uk"]}' \
+  localhost:6565 translator.TranslatorService/Translate
+```
+
+Expected response:
+
+```json
+{
+  "translations": {
+    "en": "hello world",
+    "ru": "привет мир",
+    "uk": "привіт світ"
+  }
+}
+```
+
+### REST (Java Backend)
+
+Use `curl` to hit the REST endpoint:
+
+```bash
+curl -X POST http://localhost:8080/api/translate \
+  -H "Content-Type: application/json" \
+  -d '{
+    "text": "hello world",
+    "fromLang": "en",
+    "langs": ["ru", "uk"]
+  }'
+```
