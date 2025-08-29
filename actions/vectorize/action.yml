@@ -1,0 +1,15 @@
+name: "Vectorize Repository"
+description: "Index repository files into ChromaDB"
+runs:
+  using: "node16"
+  main: "index.js"
+env:
+  OPENAI_API_KEY:
+    description: "OpenAI API Key"
+    required: true
+  CHROMA_API_KEY:
+    description: "Chroma Cloud API Key"
+    required: true
+  CHROMA_TENANT:
+    description: "Chroma Cloud Tenant ID"
+    required: true

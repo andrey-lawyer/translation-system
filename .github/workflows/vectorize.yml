@@ -1,0 +1,20 @@
+name: Vectorize Repository
+
+on:
+  workflow_dispatch:    # запуск вручную через Actions
+
+jobs:
+  vectorize:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
+
+      - name: Run Vectorization Action
+        uses: ./.github/actions/vectorize
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          CHROMA_API_KEY: ${{ secrets.CHROMA_API_KEY }}
+          CHROMA_TENANT: ${{ secrets.CHROMA_TENANT }}
+          CHROMA_DATABASE: 'Test'
