@@ -1,4 +1,4 @@
-iimport fs from "fs";
+import fs from "fs";
 import path from "path";
 import { pipeline } from "@xenova/transformers";
 import { CloudClient } from "chromadb";
