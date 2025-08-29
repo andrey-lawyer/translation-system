@@ -1,11 +1,8 @@
 import fs from "fs";
 import path from "path";
-import fetch from "node-fetch";
+import { pipeline } from "@xenova/transformers";
 
-const CHUNK_SIZE = 500;
-const DELAY_MS = 200;
-
-// Здесь мы всё ещё используем Chroma для хранения
+// Chroma Cloud для хранения embeddings
 import { CloudClient } from "chromadb";
 const chroma = new CloudClient({
     apiKey: process.env.CHROMA_API_KEY,
@@ -13,24 +10,28 @@ const chroma = new CloudClient({
     database: process.env.CHROMA_DATABASE
 });
 
-// Hugging Face embedding
+const CHUNK_SIZE = 500;
+const DELAY_MS = 200;
+
+// Инициализация локального embedder
+let embedder;
+(async () => {
+    console.log("Loading local embedding model...");
+    embedder = await pipeline("feature-extraction", "Xenova/all-MiniLM-L6-v2");
+})();
+
 async function getEmbedding(text) {
-    const res = await fetch("https://api-inference.huggingface.co/embeddings/sentence-transformers/all-MiniLM-L6-v2", {
-        method: "POST",
-        headers: {
-            "Authorization": `Bearer ${process.env.HF_API_KEY}`,
-            "Content-Type": "application/json"
-        },
-        body: JSON.stringify({ inputs: text })
-    });
-
-    if (!res.ok) {
-        const errText = await res.text();
-        throw new Error(`HF API error: ${res.status} ${errText}`);
+    // Возвращает embedding как массив чисел
+    const result = await embedder(text);
+    // Если result — многомерный массив, усредняем токены
+    if (Array.isArray(result[0])) {
+        const tokens = result[0];
+        const vector = tokens[0].map((_, i) =>
+            tokens.reduce((sum, t) => sum + t[i], 0) / tokens.length
+        );
+        return vector;
     }
-
-    const data = await res.json();
-    return data.embedding;
+    return result;
 }
 
 async function sleep(ms) {
@@ -85,7 +86,8 @@ async function walk(dir) {
 }
 
 (async () => {
-    console.log("Starting vectorization (Hugging Face)...");
+    console.log("Starting vectorization (local embeddings)...");
     await walk(".");
     console.log("✅ Vectorization complete");
 })();
+
