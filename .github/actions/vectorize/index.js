@@ -3,6 +3,10 @@ import path from "path";
 import OpenAI from "openai";
 import { CloudClient } from "chromadb";
 
+// Настройки
+const CHUNK_SIZE = 500; // строк на embedding
+const DELAY_MS = 200;   // задержка между запросами
+
 // Инициализация OpenAI и Chroma Cloud
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 const chroma = new CloudClient({
@@ -11,40 +15,54 @@ const chroma = new CloudClient({
     database: process.env.CHROMA_DATABASE
 });
 
-// Функция для обработки файла
+async function sleep(ms) {
+    return new Promise((res) => setTimeout(res, ms));
+}
+
 async function embedFile(filePath) {
+    const stats = fs.statSync(filePath);
+    if (stats.size > 200_000) {
+        console.log(`Skipping large file: ${filePath}`);
+        return;
+    }
+
     const content = fs.readFileSync(filePath, "utf-8");
     if (!content.trim()) return;
 
     const lines = content.split("\n");
-    for (let i = 0; i < lines.length; i += 200) {
-        const chunk = lines.slice(i, i + 200).join("\n");
 
-        const embedding = (await openai.embeddings.create({
-            model: "text-embedding-3-small",
-            input: chunk
-        })).data[0].embedding;
+    for (let i = 0; i < lines.length; i += CHUNK_SIZE) {
+        const chunk = lines.slice(i, i + CHUNK_SIZE).join("\n");
 
-        const collection = await chroma.getCollection({ name: "translation-system" }).catch(async () => {
-            return await chroma.createCollection({ name: "translation-system" });
-        });
+        try {
+            const embedding = (await openai.embeddings.create({
+                model: "text-embedding-3-small",
+                input: chunk
+            })).data[0].embedding;
 
-        await collection.add({
-            ids: [`${filePath}-${i}`],
-            embeddings: [embedding],
-            documents: [chunk],
-            metadatas: [{ file: filePath, start_line: i }]
-        });
+            const collection = await chroma.getCollection({ name: "translation-system" })
+                .catch(async () => await chroma.createCollection({ name: "translation-system" }));
 
-        console.log(`Indexed chunk ${i} of ${filePath}`);
+            await collection.add({
+                ids: [`${filePath}-${i}`],
+                embeddings: [embedding],
+                documents: [chunk],
+                metadatas: [{ file: filePath, start_line: i }]
+            });
+
+            console.log(`Indexed chunk ${i} of ${filePath}`);
+            await sleep(DELAY_MS);
+        } catch (err) {
+            console.error(`Error embedding ${filePath} chunk ${i}:`, err.message || err);
+        }
     }
 }
 
-// Рекурсивный обход репозитория
 async function walk(dir) {
     const files = fs.readdirSync(dir, { withFileTypes: true });
     for (const file of files) {
         const filePath = path.join(dir, file.name);
+
         if (file.isDirectory()) {
             if ([".git", "node_modules", "dist", "target"].includes(file.name)) continue;
             await walk(filePath);
