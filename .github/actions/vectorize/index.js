@@ -24,7 +24,7 @@ try {
 } catch {
     collection = await client.createCollection({
         name: "translation-system",
-        metadata: {}
+        metadata: { source: "vectorize-action" }
     });
 }
 
