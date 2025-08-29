@@ -4,7 +4,8 @@
   "type": "module",
   "dependencies": {
     "openai": "^4.32.0",
-    "chromadb": "^2.4.6"
+    "chromadb": "^2.4.6",
+    "node-fetch": "^3.3.2"
   }
 }
 

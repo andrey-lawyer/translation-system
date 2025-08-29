@@ -1,4 +1,4 @@
-name: Vectorize Repository
+name: Vectorize Repository (HF)
 
 on:
   workflow_dispatch:
@@ -19,7 +19,7 @@ jobs:
       - name: Run Vectorization Action
         run: node ./.github/actions/vectorize/index.js
         env:
-          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          HF_API_KEY: ${{ secrets.HF_API_KEY }}
           CHROMA_API_KEY: ${{ secrets.CHROMA_API_KEY }}
           CHROMA_TENANT: ${{ secrets.CHROMA_TENANT }}
           CHROMA_DATABASE: 'Test'

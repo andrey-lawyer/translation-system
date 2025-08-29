@@ -1,30 +1,45 @@
 import fs from "fs";
 import path from "path";
-import OpenAI from "openai";
+import fetch from "node-fetch";
+
+const CHUNK_SIZE = 500;
+const DELAY_MS = 200;
+
+// Здесь мы всё ещё используем Chroma для хранения
 import { CloudClient } from "chromadb";
-
-// Настройки
-const CHUNK_SIZE = 500; // строк на embedding
-const DELAY_MS = 200;   // задержка между запросами
-
-// Инициализация OpenAI и Chroma Cloud
-const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 const chroma = new CloudClient({
     apiKey: process.env.CHROMA_API_KEY,
     tenant: process.env.CHROMA_TENANT,
     database: process.env.CHROMA_DATABASE
 });
 
+// Hugging Face embedding
+async function getEmbedding(text) {
+    const res = await fetch("https://api-inference.huggingface.co/embeddings/sentence-transformers/all-MiniLM-L6-v2", {
+        method: "POST",
+        headers: {
+            "Authorization": `Bearer ${process.env.HF_API_KEY}`,
+            "Content-Type": "application/json"
+        },
+        body: JSON.stringify({ inputs: text })
+    });
+
+    if (!res.ok) {
+        const errText = await res.text();
+        throw new Error(`HF API error: ${res.status} ${errText}`);
+    }
+
+    const data = await res.json();
+    return data.embedding;
+}
+
 async function sleep(ms) {
-    return new Promise((res) => setTimeout(res, ms));
+    return new Promise(res => setTimeout(res, ms));
 }
 
 async function embedFile(filePath) {
     const stats = fs.statSync(filePath);
-    if (stats.size > 200_000) {
-        console.log(`Skipping large file: ${filePath}`);
-        return;
-    }
+    if (stats.size > 200_000) return;
 
     const content = fs.readFileSync(filePath, "utf-8");
     if (!content.trim()) return;
@@ -35,10 +50,7 @@ async function embedFile(filePath) {
         const chunk = lines.slice(i, i + CHUNK_SIZE).join("\n");
 
         try {
-            const embedding = (await openai.embeddings.create({
-                model: "text-embedding-3-small",
-                input: chunk
-            })).data[0].embedding;
+            const embedding = await getEmbedding(chunk);
 
             const collection = await chroma.getCollection({ name: "translation-system" })
                 .catch(async () => await chroma.createCollection({ name: "translation-system" }));
@@ -72,9 +84,8 @@ async function walk(dir) {
     }
 }
 
-// Запуск
 (async () => {
-    console.log("Starting vectorization...");
+    console.log("Starting vectorization (Hugging Face)...");
     await walk(".");
     console.log("✅ Vectorization complete");
 })();
