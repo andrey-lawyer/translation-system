@@ -1,8 +1,11 @@
 import fs from "fs";
 import path from "path";
-import { pipeline } from "@xenova/transformers";
+import fetch from "node-fetch";
 
-// Chroma Cloud
+const CHUNK_SIZE = 500;
+const DELAY_MS = 200;
+
+// Здесь мы всё ещё используем Chroma для хранения
 import { CloudClient } from "chromadb";
 const chroma = new CloudClient({
     apiKey: process.env.CHROMA_API_KEY,
@@ -10,29 +13,24 @@ const chroma = new CloudClient({
     database: process.env.CHROMA_DATABASE
 });
 
-const CHUNK_SIZE = 500;
-const DELAY_MS = 200;
-
-let embedder;
-
-async function initEmbedder() {
-    console.log("Loading local embedding model...");
-    embedder = await pipeline("feature-extraction", "Xenova/all-MiniLM-L6-v2");
-    console.log("Model loaded ✅");
-}
-
+// Hugging Face embedding
 async function getEmbedding(text) {
-    if (!embedder) throw new Error("Embedder not initialized");
-    const result = await embedder(text);
-    // Усредняем токены
-    if (Array.isArray(result[0])) {
-        const tokens = result[0];
-        const vector = tokens[0].map((_, i) =>
-            tokens.reduce((sum, t) => sum + t[i], 0) / tokens.length
-        );
-        return vector;
+    const res = await fetch("https://api-inference.huggingface.co/embeddings/sentence-transformers/all-MiniLM-L6-v2", {
+        method: "POST",
+        headers: {
+            "Authorization": `Bearer ${process.env.HF_API_KEY}`,
+            "Content-Type": "application/json"
+        },
+        body: JSON.stringify({ inputs: text })
+    });
+
+    if (!res.ok) {
+        const errText = await res.text();
+        throw new Error(`HF API error: ${res.status} ${errText}`);
     }
-    return result;
+
+    const data = await res.json();
+    return data.embedding;
 }
 
 async function sleep(ms) {
@@ -87,9 +85,9 @@ async function walk(dir) {
 }
 
 (async () => {
-    await initEmbedder();          // <-- Ждём модель
-    console.log("Starting vectorization (local embeddings)...");
+    console.log("Starting vectorization (Hugging Face)...");
     await walk(".");
     console.log("✅ Vectorization complete");
 })();
+
 
