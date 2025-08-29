@@ -4,7 +4,7 @@
   "type": "module",
   "dependencies": {
     "@xenova/transformers": "^2.5.0",
-    "chromadb": "^0.3.35"
+    "chromadb": "^2.4.6"
   }
 }
 
