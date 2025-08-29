@@ -19,18 +19,20 @@ const client = new CloudClient({
 
 // Проверяем или создаём коллекцию
 let collection;
+// пытаемся создать коллекцию, игнорируя дубликаты
 try {
-    // пытаемся получить существующую коллекцию
-    collection = await client.getCollection("translation-system");
+    collection = await client.createCollection({
+        name: collectionName,
+        metadata: { source: "vectorize-action" },
+    });
 } catch (err) {
-    // если коллекции нет, создаём
-    if (err.name === "ChromaNotFoundError") {
-        collection = await client.createCollection({
-            name: "translation-system",
-            metadata: { source: "vectorize-action" }
-        });
+    if (err.name === "ChromaUniqueError") {
+        // коллекция уже существует — ищем её по имени
+        const allCollections = await client.listCollections();
+        collection = allCollections.find(c => c.name === collectionName);
+        if (!collection) throw new Error("Collection exists but not found!");
     } else {
-        throw err; // если другая ошибка — кидаем дальше
+        throw err;
     }
 }
 
