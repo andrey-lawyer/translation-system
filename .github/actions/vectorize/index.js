@@ -5,23 +5,18 @@ import { CloudClient } from "chromadb";
 const CHROMA_API_KEY = process.env.CHROMA_API_KEY || '';
 const CHROMA_TENANT = process.env.CHROMA_TENANT || '';
 const CHROMA_DATABASE = process.env.CHROMA_DATABASE || '';
+const COLLECTION_ID = process.env.COLLECTION_ID || '';
+
 const COLLECTION_NAME = "TestCollection";
+
 
 async function getOrCreateCollection(client, name) {
     try {
-        // пытаемся получить коллекцию
-        const collection = await client.getCollection(name);
-        return collection;
+        return await client.getCollection({ collectionId: COLLECTION_ID });
     } catch (err) {
-        // если коллекция не найдена, создаём
         if (err.message.includes("collection not found") || err.name === "ChromaConnectionError") {
-            try {
-                console.log("Создаём новую коллекцию:", name);
-                return await client.createCollection({ name });
-            } catch (createErr) {
-                console.error("Не удалось создать коллекцию:", createErr.message);
-                return null;
-            }
+            console.log("Создаём новую коллекцию:", name);
+            return await client.createCollection({ name, collectionId: COLLECTION_ID });
         }
         console.error("Ошибка получения коллекции:", err.message);
         return null;
