@@ -3,9 +3,8 @@
   "version": "1.0.0",
   "type": "module",
   "dependencies": {
-    "openai": "^4.32.0",
-    "chromadb": "^2.4.6",
-    "node-fetch": "^3.3.2"
+    "@xenova/transformers": "^2.5.0",
+    "chromadb": "^0.3.35"
   }
 }
 

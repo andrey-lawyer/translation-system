@@ -1,40 +1,45 @@
 import fs from "fs";
 import path from "path";
-import fetch from "node-fetch";
-
-const CHUNK_SIZE = 500;
-const DELAY_MS = 200;
-
-// Здесь мы всё ещё используем Chroma для хранения
+import { pipeline } from "@xenova/transformers";
 import { CloudClient } from "chromadb";
+
+// ChromaDB
 const chroma = new CloudClient({
     apiKey: process.env.CHROMA_API_KEY,
     tenant: process.env.CHROMA_TENANT,
     database: process.env.CHROMA_DATABASE
 });
 
-// Hugging Face embedding
+const CHUNK_SIZE = 500;
+const DELAY_MS = 200;
+
+let embedder;
+
+// Инициализация модели
+async function initEmbedder() {
+    console.log("Loading local embedding model...");
+    embedder = await pipeline("feature-extraction", "Xenova/all-MiniLM-L6-v2");
+    console.log("Model loaded ✅");
+}
+
 async function getEmbedding(text) {
-    const res = await fetch("https://api-inference.huggingface.co/models/sentence-transformers/all-mpnet-base-v2", {
-        method: "POST",
-        headers: {
-            "Authorization": `Bearer ${process.env.HF_API_KEY}`,
-            "Content-Type": "application/json"
-        },
-        body: JSON.stringify({ inputs: text })
-    });
+    if (!embedder) throw new Error("Embedder not initialized");
 
-    if (!res.ok) {
-        const errText = await res.text();
-        throw new Error(`HF API error: ${res.status} ${errText}`);
+    const result = await embedder(text);
+
+    // Усреднение токенов
+    if (Array.isArray(result[0])) {
+        const tokens = result[0];
+        const vector = tokens[0].map((_, i) =>
+            tokens.reduce((sum, t) => sum + t[i], 0) / tokens.length
+        );
+        return vector;
     }
-
-    const data = await res.json();
-    return data.embedding;
+    return result;
 }
 
 async function sleep(ms) {
-    return new Promise(res => setTimeout(res, ms));
+    return new Promise((res) => setTimeout(res, ms));
 }
 
 async function embedFile(filePath) {
@@ -52,14 +57,15 @@ async function embedFile(filePath) {
         try {
             const embedding = await getEmbedding(chunk);
 
-            const collection = await chroma.getCollection({ name: "translation-system" })
+            const collection = await chroma
+                .getCollection({ name: "translation-system" })
                 .catch(async () => await chroma.createCollection({ name: "translation-system" }));
 
             await collection.add({
                 ids: [`${filePath}-${i}`],
                 embeddings: [embedding],
                 documents: [chunk],
-                metadatas: [{ file: filePath, start_line: i }]
+                metadatas: [{ file: filePath, start_line: i }],
             });
 
             console.log(`Indexed chunk ${i} of ${filePath}`);
@@ -85,9 +91,11 @@ async function walk(dir) {
 }
 
 (async () => {
-    console.log("Starting vectorization (Hugging Face)...");
+    await initEmbedder();
+    console.log("Starting vectorization (local embeddings)...");
     await walk(".");
     console.log("✅ Vectorization complete");
 })();
+
 
 
