@@ -20,12 +20,18 @@ const client = new CloudClient({
 // Проверяем или создаём коллекцию
 let collection;
 try {
+    // пытаемся получить существующую коллекцию
     collection = await client.getCollection("translation-system");
-} catch {
-    collection = await client.createCollection({
-        name: "translation-system",
-        metadata: { source: "vectorize-action" }
-    });
+} catch (err) {
+    // если коллекции нет, создаём
+    if (err.name === "ChromaNotFoundError") {
+        collection = await client.createCollection({
+            name: "translation-system",
+            metadata: { source: "vectorize-action" }
+        });
+    } else {
+        throw err; // если другая ошибка — кидаем дальше
+    }
 }
 
 // Рекурсивно обходим репозиторий
