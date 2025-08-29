@@ -12,6 +12,7 @@ const COLLECTION_NAME = "TestCollection";
 
 async function getOrCreateCollection(client, name) {
     try {
+        console.log("COLLECTION_ID- " + COLLECTION_ID)
         return await client.getCollection({ collectionId: COLLECTION_ID });
     } catch (err) {
         if (err.message.includes("collection not found") || err.name === "ChromaConnectionError") {
