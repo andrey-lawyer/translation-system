@@ -2,7 +2,7 @@ import fs from "fs";
 import path from "path";
 import { pipeline } from "@xenova/transformers";
 
-// Chroma Cloud для хранения embeddings
+// Chroma Cloud
 import { CloudClient } from "chromadb";
 const chroma = new CloudClient({
     apiKey: process.env.CHROMA_API_KEY,
@@ -13,17 +13,18 @@ const chroma = new CloudClient({
 const CHUNK_SIZE = 500;
 const DELAY_MS = 200;
 
-// Инициализация локального embedder
 let embedder;
-(async () => {
+
+async function initEmbedder() {
     console.log("Loading local embedding model...");
     embedder = await pipeline("feature-extraction", "Xenova/all-MiniLM-L6-v2");
-})();
+    console.log("Model loaded ✅");
+}
 
 async function getEmbedding(text) {
-    // Возвращает embedding как массив чисел
+    if (!embedder) throw new Error("Embedder not initialized");
     const result = await embedder(text);
-    // Если result — многомерный массив, усредняем токены
+    // Усредняем токены
     if (Array.isArray(result[0])) {
         const tokens = result[0];
         const vector = tokens[0].map((_, i) =>
@@ -86,6 +87,7 @@ async function walk(dir) {
 }
 
 (async () => {
+    await initEmbedder();          // <-- Ждём модель
     console.log("Starting vectorization (local embeddings)...");
     await walk(".");
     console.log("✅ Vectorization complete");
