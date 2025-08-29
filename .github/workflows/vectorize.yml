@@ -1,7 +1,7 @@
 name: Vectorize Repository
 
 on:
-  workflow_dispatch:    # запуск вручную через Actions
+  workflow_dispatch:
 
 jobs:
   vectorize:
@@ -11,10 +11,16 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Install dependencies
+        run: |
+          cd ./.github/actions/vectorize
+          npm install
+
       - name: Run Vectorization Action
-        uses: ./.github/actions/vectorize
+        run: node ./.github/actions/vectorize/index.js
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           CHROMA_API_KEY: ${{ secrets.CHROMA_API_KEY }}
           CHROMA_TENANT: ${{ secrets.CHROMA_TENANT }}
           CHROMA_DATABASE: 'Test'
+
