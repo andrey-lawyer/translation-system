@@ -15,7 +15,7 @@ const chroma = new CloudClient({
 
 // Hugging Face embedding
 async function getEmbedding(text) {
-    const res = await fetch("https://api-inference.huggingface.co/embeddings/sentence-transformers/all-MiniLM-L6-v2", {
+    const res = await fetch("https://api-inference.huggingface.co/models/sentence-transformers/all-mpnet-base-v2", {
         method: "POST",
         headers: {
             "Authorization": `Bearer ${process.env.HF_API_KEY}`,
