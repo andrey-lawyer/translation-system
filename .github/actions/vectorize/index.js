@@ -1,27 +1,28 @@
-import fs from "fs";
+iimport fs from "fs";
 import path from "path";
 import { pipeline } from "@xenova/transformers";
 import { CloudClient } from "chromadb";
 
-// ChromaDB
+const CHUNK_SIZE = 100; // меньше строк → меньше вероятность ошибок
+const DELAY_MS = 200;
+
+// Инициализация Chroma Cloud
 const chroma = new CloudClient({
     apiKey: process.env.CHROMA_API_KEY,
     tenant: process.env.CHROMA_TENANT,
     database: process.env.CHROMA_DATABASE
 });
 
-const CHUNK_SIZE = 500;
-const DELAY_MS = 200;
-
 let embedder;
 
-// Инициализация модели
+// Загрузка локальной модели эмбеддингов
 async function initEmbedder() {
     console.log("Loading local embedding model...");
     embedder = await pipeline("feature-extraction", "Xenova/all-MiniLM-L6-v2");
     console.log("Model loaded ✅");
 }
 
+// Получение эмбеддинга для текста
 async function getEmbedding(text) {
     if (!embedder) throw new Error("Embedder not initialized");
 
@@ -42,25 +43,33 @@ async function sleep(ms) {
     return new Promise((res) => setTimeout(res, ms));
 }
 
+// Индексация одного файла
 async function embedFile(filePath) {
     const stats = fs.statSync(filePath);
-    if (stats.size > 200_000) return;
+    if (stats.size > 200_000) return; // слишком большой файл
 
     const content = fs.readFileSync(filePath, "utf-8");
     if (!content.trim()) return;
 
     const lines = content.split("\n");
 
+    // Получаем или создаём коллекцию
+    const collectionName = "translation-system";
+    let collection;
+    try {
+        collection = await chroma.getCollection({ name: collectionName });
+    } catch {
+        collection = await chroma.createCollection({ name: collectionName });
+    }
+
     for (let i = 0; i < lines.length; i += CHUNK_SIZE) {
         const chunk = lines.slice(i, i + CHUNK_SIZE).join("\n");
+        if (!chunk.trim()) continue;
 
         try {
             const embedding = await getEmbedding(chunk);
 
-            const collection = await chroma
-                .getCollection({ name: "translation-system" })
-                .catch(async () => await chroma.createCollection({ name: "translation-system" }));
-
+            // Добавляем в Chroma Cloud
             await collection.add({
                 ids: [`${filePath}-${i}`],
                 embeddings: [embedding],
@@ -76,6 +85,7 @@ async function embedFile(filePath) {
     }
 }
 
+// Обход директории рекурсивно
 async function walk(dir) {
     const files = fs.readdirSync(dir, { withFileTypes: true });
     for (const file of files) {
@@ -90,9 +100,10 @@ async function walk(dir) {
     }
 }
 
+// Основной запуск
 (async () => {
     await initEmbedder();
-    console.log("Starting vectorization (local embeddings)...");
+    console.log("Starting vectorization (local embeddings + Chroma Cloud)...");
     await walk(".");
     console.log("✅ Vectorization complete");
 })();
