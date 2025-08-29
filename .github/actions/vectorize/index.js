@@ -1,99 +1,76 @@
-// index.js
+/// .github/actions/vectorize/index.js
 import fs from "fs";
 import path from "path";
 import { ChromaClient } from "chromadb";
-import { OpenAIEmbeddings } from "langchain/embeddings/openai"; // локальные эмбеддинги через OpenAI
+import {  pipeline } from "@xenova/transformers";
 
-// -------------------- Настройки --------------------
+// --- Настройка Chroma Cloud ---
+const CHROMA_API_URL = "https://api.trychroma.com:8000";
+const CHROMA_API_KEY = process.env.CHROMA_API_KEY; // ключ в секретах GitHub Actions
+const COLLECTION_NAME = "translation_vectors";
 
-// Название коллекции Chroma
-const collectionName = "translation_system";
-
-// Путь к директории с файлами для векторизации
-const DATA_DIR = path.resolve(process.cwd());
-
-// -------------------- Инициализация клиента Chroma --------------------
 const client = new ChromaClient({
-    url: process.env.CHROMA_URL,       // Если используешь Chroma Cloud
-    apiKey: process.env.CHROMA_API_KEY // Ключ Chroma Cloud
+    apiUrl: CHROMA_API_URL,
+    apiKey: CHROMA_API_KEY,
 });
 
-// -------------------- Создание/получение коллекции --------------------
 async function getOrCreateCollection(name) {
     try {
-        // пытаемся получить коллекцию
-        const existing = await client.getCollection({ name });
-        console.log(`Collection "${name}" уже существует ✅`);
-        return existing;
+        return await client.getCollection(name);
     } catch (err) {
-        // если не существует, создаём новую
-        console.log(`Создаём коллекцию "${name}"...`);
-        return await client.createCollection({ name });
-    }
-}
-
-// -------------------- Чтение файлов и разбивка на чанки --------------------
-function walk(dir) {
-    const files = [];
-    fs.readdirSync(dir, { withFileTypes: true }).forEach((entry) => {
-        const fullPath = path.join(dir, entry.name);
-        if (entry.isDirectory()) {
-            files.push(...walk(fullPath));
-        } else if (entry.isFile()) {
-            files.push(fullPath);
-        }
-    });
-    return files;
-}
-
-function chunkText(text, chunkSize = 500) {
-    const chunks = [];
-    for (let i = 0; i < text.length; i += chunkSize) {
-        chunks.push(text.slice(i, i + chunkSize));
-    }
-    return chunks;
-}
-
-// -------------------- Векторизация --------------------
-async function embedFile(filePath, collection, embedder) {
-    const content = fs.readFileSync(filePath, "utf-8");
-    const chunks = chunkText(content);
-    for (const [i, chunk] of chunks.entries()) {
-        try {
-            const embedding = await embedder.embed(chunk);
-            await collection.add({
-                ids: [`${filePath}-${i}`],
-                embeddings: [embedding],
-                metadatas: [{ file: filePath, chunk: i }],
-                documents: [chunk],
-            });
-            console.log(`✅ Векторизован chunk ${i} файла ${filePath}`);
-        } catch (err) {
-            console.error(`Ошибка embedding ${filePath} chunk ${i}:`, err.message);
+        if (err.name === "ChromaUniqueError") {
+            console.log("Collection already exists, using it...");
+            return await client.getCollection(name);
+        } else {
+            return await client.createCollection({ name });
         }
     }
 }
 
-// -------------------- Главная функция --------------------
+// --- Загрузка локальной модели для эмбеддингов ---
+console.log("Loading local embedding model...");
+const embedPipeline = await pipeline("feature-extraction", "Xenova/all-MiniLM-L6-v2");
+console.log("Model loaded ✅");
+
+// --- Получение файлов для векторизации ---
+const ROOT_DIR = path.resolve(process.cwd());
+const FILES = [
+    ".github/actions/vectorize/index.js",
+    "README.MD",
+    "go-translator/internal/server/server.go",
+    "go-translator/internal/translator/myMemory.go",
+    "go-translator/internal/translator/service.go",
+    "react-front/src/App.js",
+];
+
+async function embedFile(filePath) {
+    const content = fs.readFileSync(path.resolve(ROOT_DIR, filePath), "utf-8");
+    const chunk = content.substring(0, 1000); // для примера, берем первые 1000 символов
+    const vector = await embedPipeline(chunk);
+    return {
+        id: filePath,
+        vector,
+        metadata: { file: filePath },
+    };
+}
+
 async function main() {
-    console.log("Loading local embedding model...");
-    const embedder = new OpenAIEmbeddings({}); // Используем локальные эмбеддинги
-    console.log("Model loaded ✅");
+    const collection = await getOrCreateCollection(COLLECTION_NAME);
 
-    const collection = await getOrCreateCollection(collectionName);
-
-    const files = walk(DATA_DIR);
-    console.log(`Найдено файлов для векторизации: ${files.length}`);
-
-    for (const file of files) {
-        await embedFile(file, collection, embedder);
+    console.log("Starting vectorization...");
+    for (const file of FILES) {
+        try {
+            const doc = await embedFile(file);
+            await collection.add([doc]);
+            console.log(`✅ Embedded ${file}`);
+        } catch (err) {
+            console.error(`Error embedding ${file}:`, err.message);
+        }
     }
-
-    console.log("✅ Vectorization complete");
+    console.log("Vectorization complete");
 }
 
-// -------------------- Запуск --------------------
-main().catch((err) => console.error("Fatal error:", err));
+main().catch(console.error);
 
 
 
