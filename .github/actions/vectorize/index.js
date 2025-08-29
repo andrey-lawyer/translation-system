@@ -10,16 +10,14 @@ const embedder = await pipeline("feature-extraction", "Xenova/all-MiniLM-L6-v2")
 
 console.log("Model loaded ✅");
 
-// Chroma Cloud
-const client = new CloudClient({
+const collectionName = "translation-system"; // <-- добавляем это в начало файла, перед использованием
+const client = new ChromaClient({
+    url: process.env.CHROMA_URL,
     apiKey: process.env.CHROMA_API_KEY,
-    tenant: process.env.CHROMA_TENANT_ID,
-    database: "Test"
 });
 
-// Проверяем или создаём коллекцию
 let collection;
-// пытаемся создать коллекцию, игнорируя дубликаты
+
 try {
     collection = await client.createCollection({
         name: collectionName,
@@ -27,7 +25,6 @@ try {
     });
 } catch (err) {
     if (err.name === "ChromaUniqueError") {
-        // коллекция уже существует — ищем её по имени
         const allCollections = await client.listCollections();
         collection = allCollections.find(c => c.name === collectionName);
         if (!collection) throw new Error("Collection exists but not found!");
