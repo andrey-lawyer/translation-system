@@ -13,3 +13,6 @@ env:
   CHROMA_TENANT:
     description: "Chroma Cloud Tenant ID"
     required: true
+  COLLECTION_ID:
+    description: "Chroma Cloud COLLECTION ID"
+    required: true
