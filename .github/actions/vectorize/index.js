@@ -5,19 +5,22 @@ import { CloudClient } from "chromadb";
 const CHROMA_API_KEY = process.env.CHROMA_API_KEY || '';
 const CHROMA_TENANT = process.env.CHROMA_TENANT || '';
 const CHROMA_DATABASE = process.env.CHROMA_DATABASE || '';
-const COLLECTION_ID = process.env.COLLECTION_ID || '';
 
 const COLLECTION_NAME = "TestCollection";
 
 
 async function getOrCreateCollection(client, name) {
     try {
-        console.log("COLLECTION_ID- " + COLLECTION_ID)
-        return await client.getCollection({ collectionId: COLLECTION_ID });
+        console.log("Ищем коллекцию по имени:", name);
+        const collection = await client.getCollection({ name }); // <-- по имени, а не collectionId
+        console.log("Коллекция найдена:", collection);
+        return collection;
     } catch (err) {
         if (err.message.includes("collection not found") || err.name === "ChromaConnectionError") {
             console.log("Создаём новую коллекцию:", name);
-            return await client.createCollection({ name, collectionId: COLLECTION_ID });
+            const collection = await client.createCollection({ name});
+            console.log("Коллекция создана:", collection);
+            return collection;
         }
         console.error("Ошибка получения коллекции:", err.message);
         return null;
@@ -49,10 +52,10 @@ async function main() {
         try {
             console.log(`Processing ${file}...`);
             const text = await (await import('fs/promises')).readFile(file, "utf-8");
-            
+
             // Get embeddings with default settings
             const output = await embedder(text);
-            
+
             // Convert output to array if it's a tensor
             let embedding;
             if (output && typeof output === 'object' && 'data' in output) {
@@ -68,15 +71,15 @@ async function main() {
                 console.warn(`Unexpected output format from embedder for ${file}`);
                 continue;
             }
-            
+
             if (!embedding || embedding.length === 0) {
                 console.warn(`Empty embedding for ${file}`);
                 continue;
             }
-            
+
             console.log(`Generated embedding for ${file} (length: ${embedding.length})`);
             embeddings[file] = embedding;
-            
+
         } catch (err) {
             console.error(`❌ Failed processing ${file}:`, err);
         }
