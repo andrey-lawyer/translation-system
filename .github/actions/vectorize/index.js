@@ -1,15 +1,60 @@
 import { pipeline } from "@xenova/transformers";
 import { CloudClient } from "chromadb";
 import fs from "fs/promises";
+import path from "path";
 
 // Chroma credentials
 const CHROMA_API_KEY = process.env.CHROMA_API_KEY || '';
 const CHROMA_TENANT = process.env.CHROMA_TENANT || '';
 const CHROMA_DATABASE = process.env.CHROMA_DATABASE || '';
 
-const COLLECTION_NAME = "TestCollection";
+const COLLECTION_NAME = "FullProjectCollection";
 const MAX_CHUNK_LENGTH = 1000; // символов на блок
 const MAX_EMBED_DIM = 3072; // лимит для Chroma Starter
+
+// Фильтр файлов
+const INCLUDE_EXTENSIONS = [".js", ".ts", ".go", ".java", ".groovy", ".md", ".html", ".css"];
+const EXCLUDE_DIRS = ["node_modules", "vendor", ".git", "build", "out"];
+
+// Рекурсивно собираем все файлы с разрешёнными расширениями
+async function getFiles(dir) {
+    let files = [];
+    const entries = await fs.readdir(dir, { withFileTypes: true });
+
+    for (const entry of entries) {
+        const fullPath = path.join(dir, entry.name);
+
+        if (entry.isDirectory()) {
+            if (!EXCLUDE_DIRS.includes(entry.name)) {
+                files = files.concat(await getFiles(fullPath));
+            }
+        } else if (INCLUDE_EXTENSIONS.includes(path.extname(entry.name))) {
+            files.push(fullPath);
+        }
+    }
+
+    return files;
+}
+
+// Разбиваем текст на чанки
+function splitText(text, maxLength) {
+    const chunks = [];
+    for (let i = 0; i < text.length; i += maxLength) {
+        chunks.push(text.slice(i, i + maxLength));
+    }
+    return chunks;
+}
+
+// Уменьшаем размерность эмбеддинга
+function resizeEmbedding(embedding, maxDim = MAX_EMBED_DIM) {
+    if (embedding.length <= maxDim) return embedding;
+    const factor = embedding.length / maxDim;
+    const resized = [];
+    for (let i = 0; i < maxDim; i++) {
+        resized.push(embedding[Math.floor(i * factor)]);
+    }
+    return resized;
+}
 
 async function getOrCreateCollection(client, name) {
     try {
@@ -29,27 +74,6 @@ async function getOrCreateCollection(client, name) {
     }
 }
 
-// Разбиваем текст на чанки
-function splitText(text, maxLength) {
-    const chunks = [];
-    for (let i = 0; i < text.length; i += maxLength) {
-        chunks.push(text.slice(i, i + maxLength));
-    }
-    return chunks;
-}
-
-// Уменьшаем размерность эмбеддинга до лимита
-function resizeEmbedding(embedding, maxDim = MAX_EMBED_DIM) {
-    if (embedding.length <= maxDim) return embedding;
-    const factor = embedding.length / maxDim;
-    const resized = [];
-    for (let i = 0; i < maxDim; i++) {
-        const idx = Math.floor(i * factor);
-        resized.push(embedding[idx]);
-    }
-    return resized;
-}
-
 async function main() {
     console.log("Загружаем локальную модель эмбеддингов...");
     const embedder = await pipeline("feature-extraction", "Xenova/all-MiniLM-L6-v2", {
@@ -61,17 +85,12 @@ async function main() {
     });
     console.log("Модель загружена ✅");
 
-    const filesToVectorize = [
-        ".github/actions/vectorize/index.js",
-        "README.MD",
-        "go-translator/internal/server/server.go",
-        "react-front/src/App.js",
-        // добавляй остальные файлы проекта
-    ];
+    const projectFiles = await getFiles(process.cwd());
+    console.log(`Найдено файлов для векторизации: ${projectFiles.length}`);
 
     const embeddingsMap = {};
 
-    for (const file of filesToVectorize) {
+    for (const file of projectFiles) {
         try {
             console.log(`Processing ${file}...`);
             const text = await fs.readFile(file, "utf-8");
@@ -94,9 +113,7 @@ async function main() {
                     continue;
                 }
 
-                // Уменьшаем размерность до лимита
                 const resized = resizeEmbedding(embedding);
-
                 embeddingsMap[file].push({ chunkId: i, embedding: resized });
                 console.log(`Chunk ${i} of ${file} embedded (length: ${resized.length})`);
             }
@@ -145,6 +162,7 @@ async function main() {
 }
 
 main().catch(err => console.error("Fatal error:", err));
+
 
 
 
