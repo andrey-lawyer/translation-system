@@ -1,4 +1,5 @@
 import { CloudClient } from "chromadb";
+import path from "path";
 import { pipeline } from "@xenova/transformers";
 import { Octokit } from "@octokit/rest";
 
