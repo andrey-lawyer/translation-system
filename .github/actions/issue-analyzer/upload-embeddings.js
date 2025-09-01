@@ -1,112 +1,108 @@
 import { pipeline } from "@xenova/transformers";
 import { CloudClient } from "chromadb";
-import fs from "fs/promises";
-import path from "path";
-import crypto from "crypto";
 
-const CHROMA_API_KEY = process.env.CHROMA_API_KEY;
-const CHROMA_TENANT = process.env.CHROMA_TENANT;
-const CHROMA_DATABASE = process.env.CHROMA_DATABASE;
-
+// ====== CONFIG ======
+const CHROMA_API_KEY = process.env.CHROMA_API_KEY || '';
+const CHROMA_TENANT = process.env.CHROMA_TENANT || '';
+const CHROMA_DATABASE = process.env.CHROMA_DATABASE || '';
 const COLLECTION_NAME = "FullProjectCollection";
-const MAX_CHUNK_LENGTH = 1000;
-const ALLOWED_EXTENSIONS = ['.js', '.ts', '.go', '.groovy', '.java', '.html', '.css', '.md'];
-const EXCLUDED_FOLDERS = ['node_modules', 'target', 'dist', '.git'];
+const MAX_RETRIES = 3;
 
-function makeId(file, chunkId) {
-    const hash = crypto.createHash('sha256').update(file).digest('hex').slice(0, 12);
-    return `${hash}_p${chunkId}`;
+// ====== UTILS ======
+async function sleep(ms) {
+    return new Promise(resolve => setTimeout(resolve, ms));
 }
 
-function splitText(text, maxLength) {
-    const chunks = [];
-    for (let i = 0; i < text.length; i += maxLength) {
-        chunks.push(text.slice(i, i + maxLength));
-    }
-    return chunks;
-}
-
-async function getFiles(dir) {
-    let results = [];
-    const entries = await fs.readdir(dir, { withFileTypes: true });
-    for (const entry of entries) {
-        if (EXCLUDED_FOLDERS.includes(entry.name)) continue;
-        const fullPath = path.join(dir, entry.name);
-        if (entry.isDirectory()) {
-            results = results.concat(await getFiles(fullPath));
-        } else if (ALLOWED_EXTENSIONS.includes(path.extname(entry.name))) {
-            results.push(fullPath);
-        }
-    }
-    return results;
-}
-
-async function main() {
-    console.log("🚀 Loading embedding model...");
-    const embedder = await pipeline("feature-extraction", "Xenova/all-MiniLM-L6-v2", {
-        quantized: true,
-        device: "cpu",
-        pooling: "mean",
-        normalize: true
-    });
-    console.log("✅ Model loaded");
-
-    const projectRoot = path.resolve('./');
-    const files = await getFiles(projectRoot);
-    console.log(`Found ${files.length} files to vectorize`);
-
-    const embeddingsMap = {};
-
-    for (const file of files) {
+async function withRetry(fn, retries = MAX_RETRIES, delay = 1000) {
+    let lastError;
+    for (let i = 0; i < retries; i++) {
         try {
-            const text = await fs.readFile(file, 'utf-8');
-            const chunks = splitText(text, MAX_CHUNK_LENGTH);
-            embeddingsMap[file] = [];
-
-            for (let i = 0; i < chunks.length; i++) {
-                const embeddingOutput = await embedder(chunks[i]);
-                let embedding = Array.from(embeddingOutput.data || []);
-                embeddingsMap[file].push({ chunkId: i, embedding });
-                console.log(`Chunk ${i} of ${file} embedded, length: ${embedding.length}`);
-            }
+            return await fn();
         } catch (err) {
-            console.error(`❌ Failed reading/embedding ${file}:`, err.message);
+            lastError = err;
+            console.warn(`Attempt ${i + 1} failed:`, err.message);
+            await sleep(delay * (i + 1));
         }
     }
-
-    // Upload to Chroma
-    if (CHROMA_API_KEY && CHROMA_TENANT && CHROMA_DATABASE) {
-        console.log("🔌 Connecting to Chroma Cloud...");
-        const client = new CloudClient({ apiKey: CHROMA_API_KEY, tenant: CHROMA_TENANT, database: CHROMA_DATABASE });
-        let collection;
-
-        try {
-            collection = await client.getCollection({ name: COLLECTION_NAME });
-            console.log(`✅ Collection exists: ${collection.name}`);
-        } catch {
-            collection = await client.createCollection({ name: COLLECTION_NAME });
-            console.log(`✅ Collection created: ${collection.name}`);
-        }
-
-        for (const [file, chunks] of Object.entries(embeddingsMap)) {
-            for (const { chunkId, embedding } of chunks) {
-                try {
-                    await collection.add({
-                        ids: [makeId(file, chunkId)],
-                        embeddings: [embedding],
-                        metadatas: [{ file, chunkId }],
-                    });
-                    console.log(`✅ Pushed ${file} chunk ${chunkId}`);
-                } catch (err) {
-                    console.error(`❌ Failed to push ${file} chunk ${chunkId}:`, err.message);
-                }
-            }
-        }
-    } else {
-        console.log("Chroma credentials missing, skipping upload");
-    }
-
-    console.log("Vectorization complete ✅");
+    throw lastError;
 }
 
-main().catch(err => console.error("Fatal error:", err));
+// ====== MAIN ======
+async function main() {
+    try {
+        console.log("🚀 Starting issue analysis...");
+
+        if (!CHROMA_API_KEY || !CHROMA_TENANT || !CHROMA_DATABASE) {
+            console.error("❌ Missing Chroma credentials");
+            process.exit(1);
+        }
+
+        // 1️⃣ Подготовка эмбеддинга для issue
+        console.log("🔍 Vectorizing issue text...");
+        const embedder = await pipeline("feature-extraction", "Xenova/all-MiniLM-L6-v2", {
+            quantized: true,
+            device: "cpu",
+            pooling: "mean",
+            normalize: true
+        });
+
+        // Текст issue из переменной окружения
+        const ISSUE_BODY = process.env.ISSUE_BODY || '';
+        if (!ISSUE_BODY) {
+            console.error("❌ ISSUE_BODY is empty");
+            process.exit(1);
+        }
+
+        const issueEmbeddingOutput = await embedder(ISSUE_BODY);
+        let issueEmbedding;
+        if (issueEmbeddingOutput && 'data' in issueEmbeddingOutput) {
+            issueEmbedding = Array.from(issueEmbeddingOutput.data);
+        } else if (Array.isArray(issueEmbeddingOutput)) {
+            issueEmbedding = issueEmbeddingOutput.flat(Infinity);
+        } else {
+            console.error("❌ Unexpected embedding output format");
+            process.exit(1);
+        }
+        console.log("✅ Issue text embedded (length:", issueEmbedding.length, ")");
+
+        // 2️⃣ Подключение к Chroma
+        console.log("🔌 Connecting to Chroma...");
+        const client = new CloudClient({
+            apiKey: CHROMA_API_KEY,
+            tenant: CHROMA_TENANT,
+            database: CHROMA_DATABASE
+        });
+
+        const collection = await withRetry(async () => {
+            const col = await client.getCollection({ name: COLLECTION_NAME });
+            console.log("✅ Connected to collection:", col.name);
+            return col;
+        });
+
+        // 3️⃣ Запрос релевантных кусков
+        console.log("🔎 Searching for relevant code...");
+        const results = await withRetry(async () => {
+            const res = await collection.query({
+                query_embeddings: [issueEmbedding],
+                n_results: 5 // сколько релевантных кусков получить
+            });
+
+            if (!res || !res.documents || res.documents.length === 0) {
+                throw new Error("No results from Chroma");
+            }
+            return res;
+        });
+
+        console.log("✅ Found relevant chunks:");
+        results[0].documents.forEach((doc, idx) => {
+            const meta = results[0].metadatas[idx];
+            console.log(`- [${meta.file} | chunk ${meta.chunkId}]`);
+        });
+
+    } catch (err) {
+        console.error("❌ Fatal error:", err);
+        process.exit(1);
+    }
+}
+
+main();;
