@@ -48,7 +48,7 @@ async function withRetry(fn, retries = MAX_RETRIES, delay = RETRY_DELAY) {
             return await fn();
         } catch (err) {
             lastError = err;
-            console.warn(`Attempt ${i + 1} failed:`, err.message);
+            console.warn(`⚠️ Attempt ${i + 1} failed:`, err.message);
             if (i < retries - 1) await sleep(delay * (i + 1));
         }
     }
@@ -70,6 +70,8 @@ function resizeEmbedding(embedding, maxDim = MAX_EMBED_DIM) {
 async function main() {
     try {
         console.log('🚀 Starting issue analysis...');
+        console.log(`🔵 ISSUE_NUMBER: ${ISSUE_NUMBER}`);
+        console.log(`🔵 ISSUE_BODY:\n${ISSUE_BODY}`);
 
         // 1️⃣ Vectorize issue
         console.log('🔍 Vectorizing issue text...');
@@ -139,12 +141,13 @@ async function main() {
             const file = meta?.file ?? '[unknown]';
             const chunkId = meta?.chunkId ?? 0;
             const distance = distances?.[i]?.toFixed(2) ?? 'n/a';
-            console.log(`- [${file} | chunk ${chunkId} | distance: ${distance}] -> [text not available]`);
+            console.log(`- 🔵 file: ${file}, chunk: ${chunkId}, distance: ${distance}`);
         }
 
         // 4️⃣ Prepare patch
         console.log('🤖 Preparing patch...');
         let patchFile = metadatas[0]?.file;
+        console.log(`🔵 Raw patchFile from Chroma: ${patchFile}`);
         if (!patchFile) throw new Error("No valid file found for patch");
 
         // 🛠 Обрезаем путь до относительного внутри репозитория
@@ -154,9 +157,7 @@ async function main() {
         console.log(`📂 Normalized patch file path: ${patchFile}`);
 
         const patchContent = `// Auto-generated fix for issue #${ISSUE_NUMBER}\n// Placeholder content\n`;
-
-
-
+        console.log(`🔵 Patch content that will be committed:\n${patchContent}`);
 
         // 5️⃣ GitHub: branch, commit, PR
         console.log('🌿 Connecting to GitHub...');
@@ -184,8 +185,13 @@ async function main() {
         try {
             const { data: fileData } = await octokit.repos.getContent({ owner, repo, path: patchFile });
             fileSha = fileData.sha;
+            console.log(`🔵 Existing file ${patchFile} found, sha: ${fileSha}`);
         } catch (err) {
-            if (err.status !== 404) throw err;
+            if (err.status === 404) {
+                console.log(`🔵 File ${patchFile} does not exist, will create new`);
+            } else {
+                throw err;
+            }
         }
 
         console.log(`Committing changes to ${patchFile}...`);
@@ -225,3 +231,4 @@ async function main() {
 }
 
 main();
+
