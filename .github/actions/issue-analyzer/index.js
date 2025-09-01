@@ -2,7 +2,7 @@ import { CloudClient } from "chromadb";
 import { pipeline } from "@xenova/transformers";
 import { Octokit } from "@octokit/rest";
 
-// Environment validation
+// ====== ENV VALIDATION ======
 const requiredEnvVars = [
     'CHROMA_API_KEY',
     'CHROMA_TENANT',
@@ -32,8 +32,9 @@ const {
 
 const COLLECTION_NAME = "FullProjectCollection";
 const MAX_RETRIES = 3;
-const RETRY_DELAY = 2000; // 2 seconds
+const RETRY_DELAY = 2000;
 
+// ====== UTILS ======
 async function sleep(ms) {
     return new Promise(resolve => setTimeout(resolve, ms));
 }
@@ -46,41 +47,35 @@ async function withRetry(fn, retries = MAX_RETRIES, delay = RETRY_DELAY) {
         } catch (error) {
             lastError = error;
             console.warn(`Attempt ${i + 1} failed:`, error.message);
-            if (i < retries - 1) {
-                await sleep(delay * (i + 1));
-            }
+            if (i < retries - 1) await sleep(delay * (i + 1));
         }
     }
     throw lastError;
 }
 
+// ====== AI FIX GENERATOR ======
 async function aiGenerateFix(issueText, relevantChunks) {
-    try {
-        if (!relevantChunks || relevantChunks.length === 0) {
-            throw new Error('No relevant chunks provided');
-        }
-
-        // TODO: Implement actual AI processing here
-        const chunk = relevantChunks[0];
-        if (!chunk.metadata || !chunk.metadata.file) {
-            throw new Error('Invalid chunk metadata');
-        }
-
-        return {
-            file: chunk.metadata.file,
-            newContent: `// Auto-generated fix for issue #${ISSUE_NUMBER}\n${chunk.text}`
-        };
-    } catch (error) {
-        console.error('Error in AI generation:', error);
-        throw error;
+    if (!relevantChunks || relevantChunks.length === 0) {
+        throw new Error('No relevant chunks provided');
     }
+
+    const chunk = relevantChunks[0];
+    if (!chunk.metadata || !chunk.metadata.file) {
+        throw new Error('Invalid chunk metadata');
+    }
+
+    return {
+        file: chunk.metadata.file,
+        newContent: `// Auto-generated fix for issue #${ISSUE_NUMBER}\n${chunk.text || "// [text not available]"}`
+    };
 }
 
+// ====== MAIN ======
 async function main() {
     try {
         console.log('🚀 Starting issue analysis...');
 
-        // 1️⃣ Vectorize Issue text
+        // 1️⃣ Vectorize issue text
         console.log('🔍 Vectorizing issue text...');
         const embedder = await pipeline("feature-extraction", "Xenova/all-MiniLM-L6-v2", {
             quantized: true,
@@ -106,79 +101,66 @@ async function main() {
         });
 
         const collection = await withRetry(async () => {
-            try {
-                const col = await client.getCollection({ name: COLLECTION_NAME });
-                console.log(`✅ Connected to collection: ${col.name}`);
-                return col;
-            } catch (error) {
-                console.error('❌ Collection not found:', error.message);
-                throw error;
-            }
+            const col = await client.getCollection({ name: COLLECTION_NAME });
+            console.log(`✅ Connected to collection: ${col.name}`);
+            return col;
         });
 
         // 3️⃣ Query relevant chunks
         console.log('🔎 Searching for relevant code...');
         const results = await withRetry(async () => {
             const res = await collection.query({
-                query_embeddings: [issueEmbedding],
-                n_results: 3
+                queryEmbeddings: [issueEmbedding], // правильно с большой E
+                nResults: 5,                        // правильно с большой R
+                include: ["metadatas", "distances"] // documents не нужны
             });
 
-            if (!res || !res.documents || res.documents.length === 0) {
+            if (!res || !res.metadatas || res.metadatas.length === 0) {
                 throw new Error('No results from Chroma');
             }
             return res;
         });
 
+        const metadatas = results.metadatas[0];
+        const distances = results.distances?.[0];
+
+        // Подготовка списка для AI генерации
+        const relevantChunks = metadatas.map((meta, idx) => ({
+            metadata: meta,
+            text: `[text not available]`, // документы не сохранялись
+            distance: distances?.[idx]?.toFixed(2) ?? "n/a"
+        }));
+
+        console.log("✅ Found relevant chunks:");
+        relevantChunks.forEach(chunk => {
+            console.log(`- [${chunk.metadata.file} | chunk ${chunk.metadata.chunkId} | distance: ${chunk.distance}] -> ${chunk.text}`);
+        });
+
         // 4️⃣ Generate patch
         console.log('🤖 Generating fix...');
-        const patch = await aiGenerateFix(ISSUE_BODY, results[0].documents.map((text, idx) => ({
-            text,
-            metadata: results[0].metadatas[idx]
-        })));
+        const patch = await aiGenerateFix(ISSUE_BODY, relevantChunks);
 
         // 5️⃣ Create branch and commit
         console.log('🌿 Creating branch...');
         const [owner, repo] = GITHUB_REPOSITORY.split('/');
-        const octokit = new Octokit({
-            auth: GITHUB_TOKEN,
-            request: { timeout: 10000 } // 10s timeout
-        });
-
+        const octokit = new Octokit({ auth: GITHUB_TOKEN, request: { timeout: 10000 } });
         const branchName = `issue-${ISSUE_NUMBER}`;
 
-        // Get main branch SHA
         const { data: mainRef } = await withRetry(() =>
-            octokit.git.getRef({
-                owner,
-                repo,
-                ref: "heads/main"
-            })
+            octokit.git.getRef({ owner, repo, ref: "heads/main" })
         );
 
-        // Create branch
         await withRetry(() =>
-            octokit.git.createRef({
-                owner,
-                repo,
-                ref: `refs/heads/${branchName}`,
-                sha: mainRef.object.sha
-            })
+            octokit.git.createRef({ owner, repo, ref: `refs/heads/${branchName}`, sha: mainRef.object.sha })
         );
 
         // Get file SHA if exists
         let fileSha;
         try {
-            const { data: fileData } = await octokit.repos.getContent({
-                owner,
-                repo,
-                path: patch.file
-            });
+            const { data: fileData } = await octokit.repos.getContent({ owner, repo, path: patch.file });
             fileSha = fileData.sha;
         } catch (error) {
-            if (error.status !== 404) { // 404 means file doesn't exist yet
-                throw error;
-            }
+            if (error.status !== 404) throw error;
         }
 
         // Commit changes
@@ -209,7 +191,6 @@ async function main() {
         );
 
         console.log('✅ All done!');
-
     } catch (error) {
         console.error('❌ Error:', error.message);
         process.exit(1);
