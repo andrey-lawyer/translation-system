@@ -1,74 +1,68 @@
-// .github/actions/vectorize/index.js
+/// .github/actions/vectorize/index.js
 import { pipeline } from "@xenova/transformers";
 import { CloudClient } from "chromadb";
+import fs from "fs/promises";
 
-const CHROMA_API_KEY = process.env.CHROMA_API_KEY || '';
-const CHROMA_TENANT = process.env.CHROMA_TENANT || '';
-const CHROMA_DATABASE = process.env.CHROMA_DATABASE || '';
-const COLLECTION_ID = process.env.COLLECTION_ID || '';
+// --- ENV ---
+const CHROMA_API_KEY = process.env.CHROMA_API_KEY || "";
+const CHROMA_TENANT = process.env.CHROMA_TENANT || "";
+const CHROMA_DATABASE = process.env.CHROMA_DATABASE || "";
+const COLLECTION_NAME = process.env.COLLECTION_NAME || "Test";
 
-const COLLECTION_NAME = "TestCollection";
-
-
+// --- Получение/создание коллекции ---
 async function getOrCreateCollection(client, name) {
     try {
-        console.log("DEBUG - COLLECTION_ID:", COLLECTION_ID ? "[set]" : "[not set]");
         console.log("DEBUG - All env vars:", {
             CHROMA_API_KEY: CHROMA_API_KEY ? "[set]" : "[not set]",
             CHROMA_TENANT: CHROMA_TENANT ? "[set]" : "[not set]",
             CHROMA_DATABASE: CHROMA_DATABASE ? "[set]" : "[not set]",
-            COLLECTION_NAME: COLLECTION_NAME
+            COLLECTION_NAME: name,
         });
-        const collection = await client.getCollection({
-            name: "Test" // имя коллекции, а не UUID
-        });
-        console.log("DEBUG - Got collection:", collection);
+
+        const collection = await client.getCollection({ name });
+        console.log("✅ Коллекция найдена:", name);
         return collection;
-        // return await client.getCollection({ collectionId: COLLECTION_ID });
-
     } catch (err) {
-        if (err.message.includes("collection not found") || err.name === "ChromaConnectionError") {
-            console.log("Создаём новую коллекцию:", name);
+        if (err.message?.includes("not found")) {
+            console.log("ℹ️ Коллекция не найдена. Создаём новую:", name);
             const collection = await client.createCollection({ name });
-            console.log("DEBUG - Created collection:", collection);
+            console.log("✅ Создана новая коллекция:", name);
             return collection;
-
         }
-        console.error("Ошибка получения коллекции:", err.message);
+        console.error("❌ Ошибка при получении коллекции:", err.message);
         return null;
     }
 }
 
 async function main() {
-    console.log("Loading local embedding model...");
+    console.log("⏳ Загружаем локальную модель эмбеддингов...");
     const embedder = await pipeline("feature-extraction");
-    console.log("Model loaded ✅");
+    console.log("✅ Модель загружена");
 
     const filesToVectorize = [
         ".github/actions/vectorize/index.js",
         "README.MD",
         "go-translator/internal/server/server.go",
         "react-front/src/App.js",
-        // добавь остальные файлы по необходимости
     ];
 
-    // Генерируем эмбеддинги локально
+    // --- Эмбеддинги ---
     const embeddings = {};
     for (const file of filesToVectorize) {
         try {
-            const text = await (await import('fs/promises')).readFile(file, "utf-8");
+            const text = await fs.readFile(file, "utf-8");
             const embedding = await embedder(text);
             embeddings[file] = embedding;
             console.log(`✅ Embedded ${file}`);
         } catch (err) {
-            console.error(`❌ Failed embedding ${file}:`, err.message);
+            console.error(`❌ Ошибка эмбеддинга ${file}:`, err.message);
         }
     }
 
-    // Пытаемся подключиться к Chroma Cloud (опционально)
+    // --- Подключение к Chroma Cloud ---
     if (CHROMA_API_KEY && CHROMA_TENANT && CHROMA_DATABASE) {
         try {
-            console.log("Connecting to Chroma Cloud...");
+            console.log("⏳ Подключаемся к Chroma Cloud...");
             const client = new CloudClient({
                 apiKey: CHROMA_API_KEY,
                 tenant: CHROMA_TENANT,
@@ -77,11 +71,11 @@ async function main() {
 
             const collection = await getOrCreateCollection(client, COLLECTION_NAME);
             if (!collection) {
-                console.warn("Коллекция недоступна. Пропускаем загрузку в Chroma Cloud.");
+                console.warn("⚠️ Коллекция недоступна. Пропускаем загрузку.");
                 return;
             }
 
-            // Пушим эмбеддинги в Chroma
+            // --- Загрузка эмбеддингов в Chroma ---
             for (const [file, vector] of Object.entries(embeddings)) {
                 try {
                     await collection.add({
@@ -89,22 +83,23 @@ async function main() {
                         embeddings: [vector],
                         metadatas: [{ file }],
                     });
-                    console.log(`✅ Pushed ${file} to Chroma Cloud`);
+                    console.log(`✅ Загружен ${file} в Chroma Cloud`);
                 } catch (err) {
-                    console.error(`❌ Failed to push ${file}:`, err.message);
+                    console.error(`❌ Ошибка загрузки ${file}:`, err.message);
                 }
             }
         } catch (err) {
-            console.error("Chroma Cloud connection failed:", err.message);
+            console.error("❌ Ошибка подключения к Chroma Cloud:", err.message);
         }
     } else {
-        console.log("Chroma Cloud credentials not provided, skipping upload.");
+        console.log("⚠️ Данные Chroma Cloud не заданы. Пропускаем загрузку.");
     }
 
-    console.log("Vectorization complete ✅");
+    console.log("🎉 Векторизация завершена");
 }
 
-main().catch(err => console.error("Fatal error:", err));
+main().catch((err) => console.error("🔥 Fatal error:", err));
+
 
 
 
