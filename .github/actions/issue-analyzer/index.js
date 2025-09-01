@@ -26,7 +26,7 @@ const {
     CHROMA_DATABASE,
     ISSUE_BODY,
     ISSUE_NUMBER,
-    GITHUB_TOKEN,
+    GH_PAT,
     GITHUB_REPOSITORY
 } = process.env;
 
@@ -150,7 +150,7 @@ async function main() {
         // 5️⃣ GitHub: branch, commit, PR
         console.log('🌿 Connecting to GitHub...');
         const [owner, repo] = GITHUB_REPOSITORY.split('/');
-        const octokit = new Octokit({ auth: GITHUB_TOKEN });
+        const octokit = new Octokit({ auth: GH_PAT });
 
         const branchName = `issue-${ISSUE_NUMBER}`;
         console.log(`Creating branch: ${branchName}...`);
