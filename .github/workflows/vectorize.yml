@@ -14,10 +14,8 @@ jobs:
       - name: Install dependencies
         run: |
           cd ./.github/actions/vectorize
-          npm install
-
-      - name: Install sharp for Linux
-        run: npm install --platform=linux --arch=x64 sharp
+          npm ci
+          npm rebuild sharp --platform=linux --arch=x64 --verbose
 
       - name: Run Vectorization Action
         run: node ./.github/actions/vectorize/index.js
@@ -26,5 +24,6 @@ jobs:
           CHROMA_TENANT: ${{ secrets.CHROMA_TENANT }}
           CHROMA_DATABASE: ${{ secrets.CHROMA_DATABASE }}
           COLLECTION_ID: ${{ secrets.COLLECTION_ID }}
+
 
 

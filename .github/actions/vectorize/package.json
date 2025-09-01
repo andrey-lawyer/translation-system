@@ -5,7 +5,8 @@
   "dependencies": {
     "@xenova/transformers": "^2.5.0",
     "chromadb": "^2.4.6",
-    "langchain": "^0.3.31"
+    "langchain": "^0.3.31",
+    "sharp": "^0.33.0"
   }
 }
 
