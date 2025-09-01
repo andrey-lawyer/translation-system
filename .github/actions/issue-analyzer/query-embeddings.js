@@ -99,9 +99,10 @@ async function main() {
         // 3️⃣ Query relevant chunks
         console.log("🔎 Searching for relevant code...");
         const results = await withRetry(async () => {
+
             const res = await collection.query({
-                query_embeddings: [issueEmbedding],
-                n_results: 5
+                queryEmbeddings: [issueEmbedding], // <-- обязательно с большой E
+                nResults: 5                          // <-- с большой R
             });
 
             if (!res || !res.documents || res.documents.length === 0) {
