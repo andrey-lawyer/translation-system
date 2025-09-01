@@ -26,7 +26,7 @@ jobs:
 
       - name: Install dependencies
         working-directory: ./.github/actions/issue-analyzer
-        run: npm ci
+        run: npm install
 
       - name: Run Issue Analyzer
         env:
