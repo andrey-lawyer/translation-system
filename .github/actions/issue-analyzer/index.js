@@ -4,7 +4,7 @@ import { Octokit } from "@octokit/rest";
 import fs from "fs/promises";
 import path from "path";
 
-// ====== CONFIG ======
+// ====== ENVIRONMENT VALIDATION ======
 const requiredEnvVars = [
     'CHROMA_API_KEY',
     'CHROMA_TENANT',
@@ -35,7 +35,6 @@ const {
 const COLLECTION_NAME = "FullProjectCollection";
 const MAX_RETRIES = 3;
 const RETRY_DELAY = 2000; // ms
-const CHUNK_SIZE = 1000; // символов
 
 // ====== UTILS ======
 async function sleep(ms) {
@@ -49,30 +48,11 @@ async function withRetry(fn, retries = MAX_RETRIES, delay = RETRY_DELAY) {
             return await fn();
         } catch (err) {
             lastError = err;
-            console.warn(`Attempt ${i + 1} failed:`, err.message);
+            console.warn(`Attempt ${i + 1} failed: ${err.message}`);
             if (i < retries - 1) await sleep(delay * (i + 1));
         }
     }
     throw lastError;
-}
-
-function resizeEmbedding(embedding, maxDim = 3072) {
-    if (embedding.length <= maxDim) return embedding;
-    const factor = embedding.length / maxDim;
-    return Array.from({ length: maxDim }, (_, i) => embedding[Math.floor(i * factor)]);
-}
-
-// ====== AI GENERATION (заглушка) ======
-async function aiGenerateFix(issueText, relevantChunks) {
-    console.log("🤖 Generating fix from relevant chunks...");
-    if (!relevantChunks || relevantChunks.length === 0) throw new Error("No relevant chunks provided");
-
-    // Берем первый чанк
-    const chunk = relevantChunks[0];
-    return {
-        file: chunk.file,
-        newContent: `// Auto-generated fix for issue #${ISSUE_NUMBER}\n${chunk.text}`
-    };
 }
 
 // ====== MAIN ======
@@ -89,17 +69,33 @@ async function main() {
             normalize: true
         });
 
-        const embeddingOutput = await withRetry(async () => {
-            const out = await embedder(ISSUE_BODY);
-            if (!out || !out.data) throw new Error("Invalid embedding output");
-            return Array.from(out.data);
-        });
+        let issueEmbedding;
+        const embeddingOutput = await embedder(ISSUE_BODY);
 
-        console.log(`✅ Issue embedding ready (length: ${embeddingOutput.length})`);
+        if (embeddingOutput && 'data' in embeddingOutput) {
+            // pooling: "mean" даёт сразу вектор 3072
+            issueEmbedding = Array.from(embeddingOutput.data);
+        } else if (Array.isArray(embeddingOutput) && embeddingOutput.length && Array.isArray(embeddingOutput[0])) {
+            // fallback: усредняем вручную
+            const sum = new Array(embeddingOutput[0].length).fill(0);
+            for (const tokenVec of embeddingOutput) {
+                for (let i = 0; i < tokenVec.length; i++) sum[i] += tokenVec[i];
+            }
+            issueEmbedding = sum.map(x => x / embeddingOutput.length);
+        } else {
+            throw new Error("Unexpected embedding output format");
+        }
+
+        console.log("✅ Issue embedding ready (length:", issueEmbedding.length, ")");
 
         // 2️⃣ Connect to Chroma
         console.log("🔌 Connecting to Chroma...");
-        const client = new CloudClient({ apiKey: CHROMA_API_KEY, tenant: CHROMA_TENANT, database: CHROMA_DATABASE });
+        const client = new CloudClient({
+            apiKey: CHROMA_API_KEY,
+            tenant: CHROMA_TENANT,
+            database: CHROMA_DATABASE
+        });
+
         const collection = await withRetry(async () => {
             const col = await client.getCollection({ name: COLLECTION_NAME });
             console.log(`✅ Connected to collection: ${col.name}`);
@@ -110,45 +106,56 @@ async function main() {
         console.log("🔎 Searching for relevant code...");
         const results = await withRetry(async () => {
             const res = await collection.query({
-                queryEmbeddings: [embeddingOutput],
+                queryEmbeddings: [issueEmbedding],
                 nResults: 5,
                 include: ["metadatas", "distances"]
             });
-            if (!res || !res.metadatas || res.metadatas.length === 0) throw new Error("No results from Chroma");
+
+            if (!res || !res.metadatas || res.metadatas.length === 0) {
+                throw new Error("No results from Chroma");
+            }
             return res;
         });
 
         const metadatas = results.metadatas[0];
         const distances = results.distances?.[0];
-
-        // Читаем текст чанков
         const relevantChunks = [];
+
+        console.log("✅ Found relevant chunks:");
         for (let i = 0; i < metadatas.length; i++) {
             const meta = metadatas[i];
-            const file = meta.file;
-            const chunkId = meta.chunkId ?? 0;
-            let text = "[text not available]";
+            const file = meta?.file;
+            const chunkId = meta?.chunkId ?? 0;
+            let chunkText = "[text not available]";
 
-            try {
-                const content = await fs.readFile(path.resolve(file), "utf-8");
-                const start = chunkId * CHUNK_SIZE;
-                const end = start + CHUNK_SIZE;
-                text = content.slice(start, end).replace(/\n/g, "\\n");
-            } catch (err) {
-                console.warn(`Failed to read chunk ${chunkId} from ${file}:`, err.message);
+            if (file) {
+                try {
+                    const content = await fs.readFile(path.resolve(file), "utf-8");
+                    const chunkSize = 1000; // такой же, как при загрузке
+                    const start = chunkId * chunkSize;
+                    const end = start + chunkSize;
+                    chunkText = content.slice(start, end).replace(/\n/g, "\\n");
+                } catch (err) {
+                    console.warn(`Failed to read chunk ${chunkId} from ${file}: ${err.message}`);
+                }
             }
 
             const distance = distances?.[i]?.toFixed(2) ?? "n/a";
-            console.log(`- [${file} | chunk ${chunkId} | distance: ${distance}] -> ${text}`);
-
-            relevantChunks.push({ file, text });
+            console.log(`- [${file} | chunk ${chunkId} | distance: ${distance}] -> ${chunkText}`);
+            relevantChunks.push({ text: chunkText, metadata: meta });
         }
 
-        // 4️⃣ Generate patch
-        const patch = await aiGenerateFix(ISSUE_BODY, relevantChunks);
+        // 4️⃣ Generate patch (simple AI simulation)
+        console.log("🤖 Generating fix...");
+        const patch = {
+            file: relevantChunks[0]?.metadata?.file,
+            newContent: `// Auto-generated fix for issue #${ISSUE_NUMBER}\n${relevantChunks[0]?.text || ''}`
+        };
 
-        // 5️⃣ GitHub: create branch + commit + PR
-        console.log("🌿 Creating branch and committing changes...");
+        if (!patch.file) throw new Error("No valid file found for patch");
+
+        // 5️⃣ GitHub: create branch, commit, PR
+        console.log("🌿 Creating branch and PR...");
         const [owner, repo] = GITHUB_REPOSITORY.split('/');
         const octokit = new Octokit({ auth: GITHUB_TOKEN });
 
@@ -157,11 +164,18 @@ async function main() {
             octokit.git.getRef({ owner, repo, ref: "heads/main" })
         );
 
+        // Create branch
         await withRetry(() =>
-            octokit.git.createRef({ owner, repo, ref: `refs/heads/${branchName}`, sha: mainRef.object.sha })
+            octokit.git.createRef({
+                owner,
+                repo,
+                ref: `refs/heads/${branchName}`,
+                sha: mainRef.object.sha
+            })
         );
+        console.log(`✅ Branch ${branchName} created`);
 
-        // Get file SHA if exists
+        // Check if file exists
         let fileSha;
         try {
             const { data: fileData } = await octokit.repos.getContent({ owner, repo, path: patch.file });
@@ -170,7 +184,7 @@ async function main() {
             if (err.status !== 404) throw err;
         }
 
-        console.log("💾 Committing changes...");
+        // Commit file
         await withRetry(() =>
             octokit.repos.createOrUpdateFileContents({
                 owner,
@@ -182,20 +196,22 @@ async function main() {
                 branch: branchName
             })
         );
+        console.log(`✅ Changes committed to ${patch.file}`);
 
-        console.log("📝 Creating pull request...");
-        await withRetry(() =>
+        // Create PR
+        const pr = await withRetry(() =>
             octokit.pulls.create({
                 owner,
                 repo,
                 title: `Fix for issue #${ISSUE_NUMBER}`,
                 head: branchName,
-                base: 'main',
+                base: "main",
                 body: `This is an automated fix for issue #${ISSUE_NUMBER}`
             })
         );
+        console.log(`✅ Pull request created: ${pr.data.html_url}`);
 
-        console.log("✅ Pull request created successfully!");
+        console.log("✅ All done!");
 
     } catch (err) {
         console.error("❌ Fatal error:", err);
@@ -203,5 +219,8 @@ async function main() {
     }
 }
 
-main();
+main().catch(err => {
+    console.error("Unhandled error:", err);
+    process.exit(1);
+});
 
