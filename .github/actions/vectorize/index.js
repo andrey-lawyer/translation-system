@@ -63,14 +63,17 @@ async function getOrCreateCollection(client, name) {
         console.log("Коллекция найдена:", collection.name, collection.id);
         return collection;
     } catch (err) {
-        if (err.message.includes("collection not found") || err.name === "ChromaConnectionError") {
-            console.log("Создаём новую коллекцию:", name);
+        // Если ошибка — Not Found или любой другой случай, создаём коллекцию
+        console.warn("Коллекция не найдена, создаём новую:", name, "-", err.message);
+
+        try {
             const collection = await client.createCollection({ name });
-            console.log("Коллекция создана:", collection.name, collection.id);
+            console.log("Коллекция успешно создана:", collection.name, collection.id);
             return collection;
+        } catch (createErr) {
+            console.error("Ошибка при создании коллекции:", createErr.message);
+            return null;
         }
-        console.error("Ошибка получения коллекции:", err.message);
-        return null;
     }
 }
 
