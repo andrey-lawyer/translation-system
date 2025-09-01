@@ -20,6 +20,19 @@ jobs:
         working-directory: ./.github/actions/issue-analyzer
         run: npm install @xenova/transformers chromadb
 
+      # Debug step: посмотреть, что реально приходит в событии
+      - name: Debug Issue Event
+        env:
+          GITHUB_EVENT_PATH: ${{ github.event_path }}
+        run: |
+          echo "Event file: $GITHUB_EVENT_PATH"
+          echo "Full issue JSON:"
+          cat "$GITHUB_EVENT_PATH"
+          echo "Issue body from github.event.issue.body:"
+          echo "${{ github.event.issue.body }}"
+          echo "Issue title from github.event.issue.title:"
+          echo "${{ github.event.issue.title }}"
+
       - name: Upload embeddings to Chroma
         env:
           CHROMA_API_KEY: ${{ secrets.CHROMA_API_KEY }}
@@ -35,8 +48,7 @@ jobs:
           CHROMA_DATABASE: ${{ secrets.CHROMA_DATABASE }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITHUB_REPOSITORY: ${{ github.repository }}
-          ISSUE_BODY: ${{ github.event.issue.body }}
+          ISSUE_BODY: ${{ github.event.issue.body || github.event.issue.title }}
           ISSUE_NUMBER: ${{ github.event.issue.number }}
         working-directory: ./.github/actions/issue-analyzer
         run: node index.js
-
