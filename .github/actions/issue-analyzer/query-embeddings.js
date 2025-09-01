@@ -7,7 +7,7 @@ const CHROMA_TENANT = process.env.CHROMA_TENANT || '';
 const CHROMA_DATABASE = process.env.CHROMA_DATABASE || '';
 const COLLECTION_NAME = "FullProjectCollection";
 const MAX_RETRIES = 3;
-const MAX_EMBED_DIM = 3072; // лимит Chroma Starter
+const MAX_EMBED_DIM = 3072;
 
 // ====== UTILS ======
 async function sleep(ms) {
@@ -28,7 +28,6 @@ async function withRetry(fn, retries = MAX_RETRIES, delay = 1000) {
     throw lastError;
 }
 
-// Уменьшаем размерность эмбеддинга до лимита
 function resizeEmbedding(embedding, maxDim = MAX_EMBED_DIM) {
     if (embedding.length <= maxDim) return embedding;
     const factor = embedding.length / maxDim;
@@ -67,7 +66,6 @@ async function main() {
 
         const embeddingOutput = await embedder(ISSUE_BODY);
         let issueEmbedding;
-
         if (embeddingOutput && 'data' in embeddingOutput) {
             issueEmbedding = Array.from(embeddingOutput.data);
         } else if (Array.isArray(embeddingOutput)) {
@@ -77,9 +75,7 @@ async function main() {
             process.exit(1);
         }
 
-        // Resize до лимита Chroma
         issueEmbedding = resizeEmbedding(issueEmbedding);
-
         console.log("✅ Issue text embedded (length:", issueEmbedding.length, ")");
 
         // 2️⃣ Connect to Chroma
@@ -102,7 +98,7 @@ async function main() {
             const res = await collection.query({
                 queryEmbeddings: [issueEmbedding],
                 nResults: 5,
-                include: ["metadatas", "distances"], // documents не нужны
+                include: ["metadatas", "distances"] // documents нет
             });
 
             if (!res || !res.metadatas || res.metadatas.length === 0) {
@@ -112,31 +108,18 @@ async function main() {
             return res;
         });
 
-        const metadatas = results.metadatas[0]; // первый результат batch
+        const metadatas = results.metadatas[0];
         const distances = results.distances?.[0];
 
         console.log("✅ Found relevant chunks:");
-
         for (let i = 0; i < metadatas.length; i++) {
             const meta = metadatas[i];
-            const file = meta?.file;
+            const file = meta?.file ?? "unknown";
             const chunkId = meta?.chunkId ?? 0;
-            let chunkText = "[text not available]";
-
-            if (file) {
-                try {
-                    const content = await fs.readFile(path.resolve(file), "utf-8");
-                    const chunkSize = 1000; // такой же, как при загрузке
-                    const start = chunkId * chunkSize;
-                    const end = start + chunkSize;
-                    chunkText = content.slice(start, end).replace(/\n/g, "\\n");
-                } catch (err) {
-                    console.warn(`Failed to read chunk ${chunkId} from ${file}:`, err.message);
-                }
-            }
-
             const distance = distances?.[i]?.toFixed(2) ?? "n/a";
-            console.log(`- [${file} | chunk ${chunkId} | distance: ${distance}] -> ${chunkText}`);
+
+            // Здесь текста нет, выводим только метаданные
+            console.log(`- [${file} | chunk ${chunkId} | distance: ${distance}] -> [text not available]`);
         }
 
     } catch (err) {
