@@ -99,29 +99,34 @@ async function main() {
         // 3️⃣ Query relevant chunks
         console.log("🔎 Searching for relevant code...");
         const results = await withRetry(async () => {
-
             const res = await collection.query({
-                queryEmbeddings: [issueEmbedding], // <-- обязательно с большой E
-                nResults: 5                          // <-- с большой R
+                queryEmbeddings: [issueEmbedding],
+                nResults: 5
             });
-
-            if (!res || !res.documents || res.documents.length === 0) {
-                throw new Error("No results from Chroma");
-            }
+            console.log("Raw query results:", JSON.stringify(res, null, 2)); // <-- вот этот лог
             return res;
         });
 
-        console.log("✅ Found relevant chunks:");
-
-        const { ids, metadatas } = results;
-
-        if (!ids || ids.length === 0) {
-            console.log("No relevant chunks found.");
+// Проверяем результат
+        if (!results) {
+            console.log("No results returned from query");
         } else {
-            console.log("✅ Found relevant chunks:");
-            metadatas.forEach((meta, idx) => {
-                console.log(`- [${meta.file} | chunk ${meta.chunkId}]`);
-            });
+            const { ids, metadatas, documents } = results;
+
+            console.log("ids:", ids);
+            console.log("documents:", documents);
+            console.log("metadatas:", metadatas);
+
+            if (!metadatas || metadatas.length === 0) {
+                console.log("No relevant chunks found.");
+            } else {
+                console.log("✅ Found relevant chunks:");
+                metadatas.forEach((meta, idx) => {
+                    const file = meta?.file || "unknown";
+                    const chunkId = meta?.chunkId ?? "unknown";
+                    console.log(`- [${file} | chunk ${chunkId}]`);
+                });
+            }
         }
 
     } catch (err) {
