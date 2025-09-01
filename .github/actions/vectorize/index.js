@@ -12,12 +12,27 @@ const COLLECTION_NAME = "TestCollection";
 
 async function getOrCreateCollection(client, name) {
     try {
-        console.log("COLLECTION_ID- " + COLLECTION_ID)
-        return await client.getCollection({ collectionId: COLLECTION_ID });
+        console.log("DEBUG - COLLECTION_ID:", COLLECTION_ID ? "[set]" : "[not set]");
+        console.log("DEBUG - All env vars:", {
+            CHROMA_API_KEY: CHROMA_API_KEY ? "[set]" : "[not set]",
+            CHROMA_TENANT: CHROMA_TENANT ? "[set]" : "[not set]",
+            CHROMA_DATABASE: CHROMA_DATABASE ? "[set]" : "[not set]",
+            COLLECTION_NAME: COLLECTION_NAME
+        });
+        const collection = await client.getCollection({
+            name: "Test" // имя коллекции, а не UUID
+        });
+        console.log("DEBUG - Got collection:", collection);
+        return collection;
+        // return await client.getCollection({ collectionId: COLLECTION_ID });
+
     } catch (err) {
         if (err.message.includes("collection not found") || err.name === "ChromaConnectionError") {
             console.log("Создаём новую коллекцию:", name);
-            return await client.createCollection({ name, collectionId: COLLECTION_ID });
+            const collection = await client.createCollection({ name });
+            console.log("DEBUG - Created collection:", collection);
+            return collection;
+
         }
         console.error("Ошибка получения коллекции:", err.message);
         return null;
