@@ -112,10 +112,17 @@ async function main() {
         });
 
         console.log("✅ Found relevant chunks:");
-        results[0].documents.forEach((doc, idx) => {
-            const meta = results[0].metadatas[idx];
-            console.log(`- [${meta.file} | chunk ${meta.chunkId}]`);
-        });
+
+        const { ids, metadatas } = results;
+
+        if (!ids || ids.length === 0) {
+            console.log("No relevant chunks found.");
+        } else {
+            console.log("✅ Found relevant chunks:");
+            metadatas.forEach((meta, idx) => {
+                console.log(`- [${meta.file} | chunk ${meta.chunkId}]`);
+            });
+        }
 
     } catch (err) {
         console.error("❌ Fatal error:", err);
