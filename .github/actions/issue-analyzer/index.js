@@ -1,5 +1,6 @@
 import { CloudClient } from "chromadb";
 import { pipeline } from "@xenova/transformers";
+import { Octokit } from "@octokit/rest";
 
 // ====== ENVIRONMENT VALIDATION ======
 const requiredEnvVars = [
@@ -81,7 +82,6 @@ async function main() {
         let embeddingOutput = await withRetry(() => embedder(ISSUE_BODY));
         let issueEmbedding;
 
-        // Обработка разных форматов выхода
         if (embeddingOutput && 'data' in embeddingOutput) {
             issueEmbedding = Array.from(embeddingOutput.data);
         } else if (Array.isArray(embeddingOutput)) {
@@ -98,7 +98,6 @@ async function main() {
             throw new Error('Unexpected embedding output format');
         }
 
-        // Resize до лимита Chroma
         issueEmbedding = resizeEmbedding(issueEmbedding, MAX_EMBED_DIM);
         console.log("✅ Issue embedding ready (length:", issueEmbedding.length, ")");
 
@@ -124,7 +123,6 @@ async function main() {
                 nResults: 5,
                 include: ["metadatas", "distances"]
             });
-
             if (!res || !res.metadatas || res.metadatas.length === 0) {
                 throw new Error('No results from Chroma');
             }
@@ -143,8 +141,71 @@ async function main() {
             console.log(`- [${file} | chunk ${chunkId} | distance: ${distance}] -> [text not available]`);
         }
 
-        // 4️⃣ (Опционально) Генерация патча через AI
-        // Здесь можно вызвать вашу функцию aiGenerateFix с метаданными
+        // 4️⃣ Prepare patch
+        console.log('🤖 Preparing patch...');
+        const patchFile = metadatas[0]?.file;
+        if (!patchFile) throw new Error("No valid file found for patch");
+        const patchContent = `// Auto-generated fix for issue #${ISSUE_NUMBER}\n// Placeholder content\n`;
+
+        // 5️⃣ GitHub: branch, commit, PR
+        console.log('🌿 Connecting to GitHub...');
+        const [owner, repo] = GITHUB_REPOSITORY.split('/');
+        const octokit = new Octokit({ auth: GITHUB_TOKEN });
+
+        const branchName = `issue-${ISSUE_NUMBER}`;
+        console.log(`Creating branch: ${branchName}...`);
+        const { data: mainRef } = await withRetry(() =>
+            octokit.git.getRef({ owner, repo, ref: 'heads/main' })
+        );
+
+        await withRetry(() =>
+            octokit.git.createRef({
+                owner,
+                repo,
+                ref: `refs/heads/${branchName}`,
+                sha: mainRef.object.sha
+            })
+        );
+        console.log(`✅ Branch ${branchName} created`);
+
+        // Commit file
+        let fileSha;
+        try {
+            const { data: fileData } = await octokit.repos.getContent({ owner, repo, path: patchFile });
+            fileSha = fileData.sha;
+        } catch (err) {
+            if (err.status !== 404) throw err;
+        }
+
+        console.log(`Committing changes to ${patchFile}...`);
+        await withRetry(() =>
+            octokit.repos.createOrUpdateFileContents({
+                owner,
+                repo,
+                path: patchFile,
+                message: `Fix for issue #${ISSUE_NUMBER}`,
+                content: Buffer.from(patchContent).toString('base64'),
+                sha: fileSha,
+                branch: branchName
+            })
+        );
+        console.log(`✅ Changes committed to ${patchFile}`);
+
+        // Create PR
+        console.log('Creating pull request...');
+        const pr = await withRetry(() =>
+            octokit.pulls.create({
+                owner,
+                repo,
+                title: `Fix for issue #${ISSUE_NUMBER}`,
+                head: branchName,
+                base: 'main',
+                body: `Automated fix for issue #${ISSUE_NUMBER}`
+            })
+        );
+        console.log(`✅ Pull request created: ${pr.data.html_url}`);
+
+        console.log('✅ All done!');
 
     } catch (err) {
         console.error('❌ Fatal error:', err);
