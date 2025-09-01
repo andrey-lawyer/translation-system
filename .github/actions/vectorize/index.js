@@ -72,16 +72,20 @@ async function main() {
             // Пушим эмбеддинги
             for (const [file, vector] of Object.entries(embeddings)) {
                 try {
+                    // vector может быть [[0.1, 0.2, ...]] → берем vector[0]
+                    const embeddingVector = Array.isArray(vector[0]) ? vector[0] : vector;
                     await collection.add({
                         ids: [file],
-                        embeddings: [vector],
+                        embeddings: [embeddingVector],
                         metadatas: [{ file }],
                     });
                     console.log(`✅ Pushed ${file} to Chroma Cloud`);
                 } catch (err) {
                     console.error(`❌ Failed to push ${file}:`, err.message);
+                    if (err.response) console.error("DEBUG - Response:", await err.response.text());
                 }
             }
+
 
         } catch (err) {
             console.error("❌ Ошибка подключения к Chroma Cloud:", err.message);
