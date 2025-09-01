@@ -9,18 +9,19 @@ const CHROMA_DATABASE = process.env.CHROMA_DATABASE || '';
 
 const COLLECTION_NAME = "TestCollection";
 const MAX_CHUNK_LENGTH = 1000; // символов на блок
+const MAX_EMBED_DIM = 3072; // лимит для Chroma Starter
 
 async function getOrCreateCollection(client, name) {
     try {
         console.log("Ищем коллекцию по имени:", name);
         const collection = await client.getCollection({ name });
-        console.log("Коллекция найдена:", collection);
+        console.log("Коллекция найдена:", collection.name, collection.id);
         return collection;
     } catch (err) {
         if (err.message.includes("collection not found") || err.name === "ChromaConnectionError") {
             console.log("Создаём новую коллекцию:", name);
             const collection = await client.createCollection({ name });
-            console.log("Коллекция создана:", collection);
+            console.log("Коллекция создана:", collection.name, collection.id);
             return collection;
         }
         console.error("Ошибка получения коллекции:", err.message);
@@ -28,13 +29,25 @@ async function getOrCreateCollection(client, name) {
     }
 }
 
-// Разбиваем текст на блоки
+// Разбиваем текст на чанки
 function splitText(text, maxLength) {
     const chunks = [];
     for (let i = 0; i < text.length; i += maxLength) {
         chunks.push(text.slice(i, i + maxLength));
     }
     return chunks;
+}
+
+// Уменьшаем размерность эмбеддинга до лимита
+function resizeEmbedding(embedding, maxDim = MAX_EMBED_DIM) {
+    if (embedding.length <= maxDim) return embedding;
+    const factor = embedding.length / maxDim;
+    const resized = [];
+    for (let i = 0; i < maxDim; i++) {
+        const idx = Math.floor(i * factor);
+        resized.push(embedding[idx]);
+    }
+    return resized;
 }
 
 async function main() {
@@ -53,6 +66,7 @@ async function main() {
         "README.MD",
         "go-translator/internal/server/server.go",
         "react-front/src/App.js",
+        // добавляй остальные файлы проекта
     ];
 
     const embeddingsMap = {};
@@ -80,8 +94,11 @@ async function main() {
                     continue;
                 }
 
-                embeddingsMap[file].push({ chunkId: i, embedding });
-                console.log(`Chunk ${i} of ${file} embedded (length: ${embedding.length})`);
+                // Уменьшаем размерность до лимита
+                const resized = resizeEmbedding(embedding);
+
+                embeddingsMap[file].push({ chunkId: i, embedding: resized });
+                console.log(`Chunk ${i} of ${file} embedded (length: ${resized.length})`);
             }
         } catch (err) {
             console.error(`❌ Failed processing ${file}:`, err);
@@ -121,13 +138,14 @@ async function main() {
             console.error("Chroma Cloud connection failed:", err.message);
         }
     } else {
-        console.log("Chroma Cloud credentials not предоставлены, пропускаем upload.");
+        console.log("Chroma Cloud credentials not provided, пропускаем upload.");
     }
 
     console.log("Vectorization complete ✅");
 }
 
 main().catch(err => console.error("Fatal error:", err));
+
 
 
 
