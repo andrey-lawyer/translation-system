@@ -9,7 +9,7 @@ const requiredEnvVars = [
     'CHROMA_DATABASE',
     'ISSUE_BODY',
     'ISSUE_NUMBER',
-    'GITHUB_TOKEN',
+    'GH_PAT',
     'GITHUB_REPOSITORY'
 ];
 
