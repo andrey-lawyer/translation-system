@@ -4,28 +4,29 @@ on:
   issues:
     types: [opened]
 
-permissions:
-  contents: write  # Required to create branches and PRs
-  pull-requests: write  # Required to create PRs
-
 jobs:
   auto-fix:
     runs-on: ubuntu-latest
-    timeout-minutes: 10  # Prevent hanging jobs
     steps:
-      - name: Checkout repo
-        uses: actions/checkout@v3
+      - uses: actions/checkout@v3
         with:
-          fetch-depth: 0  # Required for git operations
+          fetch-depth: 0
 
-      - name: Setup Node
-        uses: actions/setup-node@v3
+      - uses: actions/setup-node@v3
         with:
           node-version: 20
 
-      - name: Install dependencies
+      - name: Install dependencies for embedding
         working-directory: ./.github/actions/issue-analyzer
-        run: npm install
+        run: npm install @xenova/transformers chromadb
+
+      - name: Upload embeddings to Chroma
+        env:
+          CHROMA_API_KEY: ${{ secrets.CHROMA_API_KEY }}
+          CHROMA_TENANT: ${{ secrets.CHROMA_TENANT }}
+          CHROMA_DATABASE: ${{ secrets.CHROMA_DATABASE }}
+        working-directory: ./.github/actions/issue-analyzer
+        run: node upload-embeddings.js
 
       - name: Run Issue Analyzer
         env:
@@ -38,3 +39,4 @@ jobs:
           ISSUE_NUMBER: ${{ github.event.issue.number }}
         working-directory: ./.github/actions/issue-analyzer
         run: node index.js
+
