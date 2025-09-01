@@ -143,9 +143,18 @@ async function main() {
 
         // 4️⃣ Prepare patch
         console.log('🤖 Preparing patch...');
-        const patchFile = metadatas[0]?.file;
+        // берём относительный путь относительно корня репозитория
+        let patchFile = metadatas[0]?.file;
         if (!patchFile) throw new Error("No valid file found for patch");
+
+        // убираем абсолютные пути (например, /home/runner/work/.../repo-name/)
+        const repoRoot = process.cwd();
+        patchFile = path.relative(repoRoot, patchFile).replace(/^\/+/, "");
+        console.log(`📂 Normalized patch file path: ${patchFile}`);
         const patchContent = `// Auto-generated fix for issue #${ISSUE_NUMBER}\n// Placeholder content\n`;
+
+
+
 
         // 5️⃣ GitHub: branch, commit, PR
         console.log('🌿 Connecting to GitHub...');
