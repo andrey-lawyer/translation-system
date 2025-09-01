@@ -1,8 +1,10 @@
 import { CloudClient } from "chromadb";
 import { pipeline } from "@xenova/transformers";
+import fs from "fs/promises";
+import path from "path";
 import { Octokit } from "@octokit/rest";
 
-// ====== ENV VALIDATION ======
+// ====== ENVIRONMENT VALIDATION ======
 const requiredEnvVars = [
     'CHROMA_API_KEY',
     'CHROMA_TENANT',
@@ -32,7 +34,8 @@ const {
 
 const COLLECTION_NAME = "FullProjectCollection";
 const MAX_RETRIES = 3;
-const RETRY_DELAY = 2000;
+const RETRY_DELAY = 2000; // ms
+const MAX_EMBED_DIM = 3072; // Chroma Starter limit
 
 // ====== UTILS ======
 async function sleep(ms) {
@@ -44,30 +47,24 @@ async function withRetry(fn, retries = MAX_RETRIES, delay = RETRY_DELAY) {
     for (let i = 0; i < retries; i++) {
         try {
             return await fn();
-        } catch (error) {
-            lastError = error;
-            console.warn(`Attempt ${i + 1} failed:`, error.message);
+        } catch (err) {
+            lastError = err;
+            console.warn(`Attempt ${i + 1} failed:`, err.message);
             if (i < retries - 1) await sleep(delay * (i + 1));
         }
     }
     throw lastError;
 }
 
-// ====== AI FIX GENERATOR ======
-async function aiGenerateFix(issueText, relevantChunks) {
-    if (!relevantChunks || relevantChunks.length === 0) {
-        throw new Error('No relevant chunks provided');
+// Resize embedding до лимита
+function resizeEmbedding(embedding, maxDim = MAX_EMBED_DIM) {
+    if (embedding.length <= maxDim) return embedding;
+    const factor = embedding.length / maxDim;
+    const resized = [];
+    for (let i = 0; i < maxDim; i++) {
+        resized.push(embedding[Math.floor(i * factor)]);
     }
-
-    const chunk = relevantChunks[0];
-    if (!chunk.metadata || !chunk.metadata.file) {
-        throw new Error('Invalid chunk metadata');
-    }
-
-    return {
-        file: chunk.metadata.file,
-        newContent: `// Auto-generated fix for issue #${ISSUE_NUMBER}\n${chunk.text || "// [text not available]"}`
-    };
+    return resized;
 }
 
 // ====== MAIN ======
@@ -75,7 +72,7 @@ async function main() {
     try {
         console.log('🚀 Starting issue analysis...');
 
-        // 1️⃣ Vectorize issue text
+        // 1️⃣ Vectorize issue
         console.log('🔍 Vectorizing issue text...');
         const embedder = await pipeline("feature-extraction", "Xenova/all-MiniLM-L6-v2", {
             quantized: true,
@@ -84,13 +81,29 @@ async function main() {
             normalize: true
         });
 
-        const issueEmbedding = await withRetry(async () => {
-            const output = await embedder(ISSUE_BODY);
-            if (!output || !output.data) {
-                throw new Error('Invalid embedding output');
-            }
-            return Array.from(output.data);
-        });
+        let embeddingOutput = await withRetry(() => embedder(ISSUE_BODY));
+        let issueEmbedding;
+
+        // Обработка разных форматов выхода
+        if (embeddingOutput && 'data' in embeddingOutput) {
+            issueEmbedding = Array.from(embeddingOutput.data);
+        } else if (Array.isArray(embeddingOutput)) {
+            // flatten + mean
+            const flat = embeddingOutput.flat(1);
+            const dim = flat[0]?.length || flat.length;
+            issueEmbedding = new Array(dim).fill(0);
+            flat.forEach(vec => {
+                vec.forEach((val, idx) => {
+                    issueEmbedding[idx] += val / flat.length;
+                });
+            });
+        } else {
+            throw new Error('Unexpected embedding output format');
+        }
+
+        // Resize до лимита Chroma
+        issueEmbedding = resizeEmbedding(issueEmbedding, MAX_EMBED_DIM);
+        console.log("✅ Issue embedding ready (length:", issueEmbedding.length, ")");
 
         // 2️⃣ Connect to Chroma
         console.log('🔌 Connecting to Chroma...');
@@ -110,9 +123,9 @@ async function main() {
         console.log('🔎 Searching for relevant code...');
         const results = await withRetry(async () => {
             const res = await collection.query({
-                queryEmbeddings: [issueEmbedding], // правильно с большой E
-                nResults: 5,                        // правильно с большой R
-                include: ["metadatas", "distances"] // documents не нужны
+                queryEmbeddings: [issueEmbedding],
+                nResults: 5,
+                include: ["metadatas", "distances"]
             });
 
             if (!res || !res.metadatas || res.metadatas.length === 0) {
@@ -124,80 +137,22 @@ async function main() {
         const metadatas = results.metadatas[0];
         const distances = results.distances?.[0];
 
-        // Подготовка списка для AI генерации
-        const relevantChunks = metadatas.map((meta, idx) => ({
-            metadata: meta,
-            text: `[text not available]`, // документы не сохранялись
-            distance: distances?.[idx]?.toFixed(2) ?? "n/a"
-        }));
-
-        console.log("✅ Found relevant chunks:");
-        relevantChunks.forEach(chunk => {
-            console.log(`- [${chunk.metadata.file} | chunk ${chunk.metadata.chunkId} | distance: ${chunk.distance}] -> ${chunk.text}`);
-        });
-
-        // 4️⃣ Generate patch
-        console.log('🤖 Generating fix...');
-        const patch = await aiGenerateFix(ISSUE_BODY, relevantChunks);
-
-        // 5️⃣ Create branch and commit
-        console.log('🌿 Creating branch...');
-        const [owner, repo] = GITHUB_REPOSITORY.split('/');
-        const octokit = new Octokit({ auth: GITHUB_TOKEN, request: { timeout: 10000 } });
-        const branchName = `issue-${ISSUE_NUMBER}`;
-
-        const { data: mainRef } = await withRetry(() =>
-            octokit.git.getRef({ owner, repo, ref: "heads/main" })
-        );
-
-        await withRetry(() =>
-            octokit.git.createRef({ owner, repo, ref: `refs/heads/${branchName}`, sha: mainRef.object.sha })
-        );
-
-        // Get file SHA if exists
-        let fileSha;
-        try {
-            const { data: fileData } = await octokit.repos.getContent({ owner, repo, path: patch.file });
-            fileSha = fileData.sha;
-        } catch (error) {
-            if (error.status !== 404) throw error;
+        console.log('✅ Found relevant chunks:');
+        for (let i = 0; i < metadatas.length; i++) {
+            const meta = metadatas[i];
+            const file = meta?.file ?? '[unknown]';
+            const chunkId = meta?.chunkId ?? 0;
+            const distance = distances?.[i]?.toFixed(2) ?? 'n/a';
+            console.log(`- [${file} | chunk ${chunkId} | distance: ${distance}] -> [text not available]`);
         }
 
-        // Commit changes
-        console.log('💾 Committing changes...');
-        await withRetry(() =>
-            octokit.repos.createOrUpdateFileContents({
-                owner,
-                repo,
-                path: patch.file,
-                message: `Fix for issue #${ISSUE_NUMBER}`,
-                content: Buffer.from(patch.newContent).toString('base64'),
-                sha: fileSha,
-                branch: branchName
-            })
-        );
+        // 4️⃣ (Опционально) Генерация патча через AI
+        // Здесь можно вызвать вашу функцию aiGenerateFix с метаданными
 
-        // Create PR
-        console.log('📝 Creating pull request...');
-        await withRetry(() =>
-            octokit.pulls.create({
-                owner,
-                repo,
-                title: `Fix for issue #${ISSUE_NUMBER}`,
-                head: branchName,
-                base: 'main',
-                body: `This is an automated fix for issue #${ISSUE_NUMBER}`
-            })
-        );
-
-        console.log('✅ All done!');
-    } catch (error) {
-        console.error('❌ Error:', error.message);
+    } catch (err) {
+        console.error('❌ Fatal error:', err);
         process.exit(1);
     }
 }
 
-main().catch(err => {
-    console.error('Unhandled error:', err);
-    process.exit(1);
-});
+main();
