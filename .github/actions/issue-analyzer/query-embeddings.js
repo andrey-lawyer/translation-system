@@ -7,6 +7,7 @@ const CHROMA_TENANT = process.env.CHROMA_TENANT || '';
 const CHROMA_DATABASE = process.env.CHROMA_DATABASE || '';
 const COLLECTION_NAME = "FullProjectCollection";
 const MAX_RETRIES = 3;
+const MAX_EMBED_DIM = 3072; // лимит Chroma Starter
 
 // ====== UTILS ======
 async function sleep(ms) {
@@ -27,6 +28,18 @@ async function withRetry(fn, retries = MAX_RETRIES, delay = 1000) {
     throw lastError;
 }
 
+// Уменьшаем размерность эмбеддинга до лимита
+function resizeEmbedding(embedding, maxDim = MAX_EMBED_DIM) {
+    if (embedding.length <= maxDim) return embedding;
+    const factor = embedding.length / maxDim;
+    const resized = [];
+    for (let i = 0; i < maxDim; i++) {
+        const idx = Math.floor(i * factor);
+        resized.push(embedding[idx]);
+    }
+    return resized;
+}
+
 // ====== MAIN ======
 async function main() {
     try {
@@ -37,7 +50,7 @@ async function main() {
             process.exit(1);
         }
 
-        // 1️⃣ Подготовка эмбеддинга для issue
+        // 1️⃣ Vectorize issue
         console.log("🔍 Vectorizing issue text...");
         const embedder = await pipeline("feature-extraction", "Xenova/all-MiniLM-L6-v2", {
             quantized: true,
@@ -46,26 +59,30 @@ async function main() {
             normalize: true
         });
 
-        // Текст issue из переменной окружения
         const ISSUE_BODY = process.env.ISSUE_BODY || '';
         if (!ISSUE_BODY) {
             console.error("❌ ISSUE_BODY is empty");
             process.exit(1);
         }
 
-        const issueEmbeddingOutput = await embedder(ISSUE_BODY);
+        const embeddingOutput = await embedder(ISSUE_BODY);
         let issueEmbedding;
-        if (issueEmbeddingOutput && 'data' in issueEmbeddingOutput) {
-            issueEmbedding = Array.from(issueEmbeddingOutput.data);
-        } else if (Array.isArray(issueEmbeddingOutput)) {
-            issueEmbedding = issueEmbeddingOutput.flat(Infinity);
+
+        if (embeddingOutput && 'data' in embeddingOutput) {
+            issueEmbedding = Array.from(embeddingOutput.data);
+        } else if (Array.isArray(embeddingOutput)) {
+            issueEmbedding = embeddingOutput.flat(Infinity);
         } else {
             console.error("❌ Unexpected embedding output format");
             process.exit(1);
         }
+
+        // Resize до лимита Chroma
+        issueEmbedding = resizeEmbedding(issueEmbedding);
+
         console.log("✅ Issue text embedded (length:", issueEmbedding.length, ")");
 
-        // 2️⃣ Подключение к Chroma
+        // 2️⃣ Connect to Chroma
         console.log("🔌 Connecting to Chroma...");
         const client = new CloudClient({
             apiKey: CHROMA_API_KEY,
@@ -79,12 +96,12 @@ async function main() {
             return col;
         });
 
-        // 3️⃣ Запрос релевантных кусков
+        // 3️⃣ Query relevant chunks
         console.log("🔎 Searching for relevant code...");
         const results = await withRetry(async () => {
             const res = await collection.query({
                 query_embeddings: [issueEmbedding],
-                n_results: 5 // сколько релевантных кусков получить
+                n_results: 5
             });
 
             if (!res || !res.documents || res.documents.length === 0) {
@@ -105,4 +122,4 @@ async function main() {
     }
 }
 
-main();;
+main();
