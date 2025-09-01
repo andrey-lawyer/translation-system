@@ -1,30 +1,36 @@
-// .github/actions/vectorize/index.js
 import { pipeline } from "@xenova/transformers";
 import { CloudClient } from "chromadb";
 import fs from "fs/promises";
 
+// Chroma Cloud настройки из env
 const CHROMA_API_KEY = process.env.CHROMA_API_KEY || '';
 const CHROMA_TENANT = process.env.CHROMA_TENANT || '';
 const CHROMA_DATABASE = process.env.CHROMA_DATABASE || '';
-const COLLECTION_NAME = process.env.COLLECTION_NAME || "TestCollection";
+const COLLECTION_NAME = process.env.COLLECTION_NAME || 'TestCollection';
 
-// ----------------------
-// Функция усреднения вложенного эмбеддинга
-// ----------------------
+// Файлы для векторизации
+const filesToVectorize = [
+    ".github/actions/vectorize/index.js",
+    "README.MD",
+    "go-translator/internal/server/server.go",
+    "react-front/src/App.js",
+];
+
+// Функция усреднения токенов в один embedding
 function flattenEmbedding(embedding) {
     if (!Array.isArray(embedding)) return [];
-    if (!Array.isArray(embedding[0])) return embedding; // уже плоский
-    const length = embedding[0].length;
-    const sum = new Array(length).fill(0);
-    for (const tokenVec of embedding) {
-        for (let i = 0; i < length; i++) sum[i] += tokenVec[i];
+    if (embedding.length === 0) return [];
+    if (Array.isArray(embedding[0])) {
+        const length = embedding[0].length;
+        const sum = new Array(length).fill(0);
+        for (const tokenVec of embedding) {
+            for (let i = 0; i < length; i++) sum[i] += tokenVec[i] || 0;
+        }
+        return sum.map(x => x / embedding.length);
     }
-    return sum.map(x => x / embedding.length);
+    return embedding;
 }
 
-// ----------------------
-// Получаем или создаём коллекцию в Chroma
-// ----------------------
 async function getOrCreateCollection(client, name) {
     try {
         console.log(`⏳ Ищем коллекцию: ${name}...`);
@@ -33,7 +39,7 @@ async function getOrCreateCollection(client, name) {
         return collection;
     } catch (err) {
         if (err.message.includes("collection not found") || err.name === "ChromaConnectionError") {
-            console.log(`⏳ Создаём новую коллекцию: ${name}...`);
+            console.log(`Создаём новую коллекцию: ${name}...`);
             const collection = await client.createCollection({ name });
             console.log(`✅ Коллекция создана: ID=${collection.id}, name=${collection.name}`);
             return collection;
@@ -43,31 +49,24 @@ async function getOrCreateCollection(client, name) {
     }
 }
 
-// ----------------------
-// Основная функция
-// ----------------------
 async function main() {
     console.log("⏳ Загружаем локальную модель эмбеддингов...");
     const embedder = await pipeline("feature-extraction");
     console.log("✅ Модель загружена");
 
-    const filesToVectorize = [
-        ".github/actions/vectorize/index.js",
-        "README.MD",
-        "go-translator/internal/server/server.go",
-        "react-front/src/App.js",
-        // добавь остальные файлы при необходимости
-    ];
-
-    // ----------------------
-    // Генерируем эмбеддинги локально
-    // ----------------------
+    // Генерация эмбеддингов
     const embeddings = {};
     for (const file of filesToVectorize) {
         try {
             const text = await fs.readFile(file, "utf-8");
             const embeddingRaw = await embedder(text);
             const embedding = flattenEmbedding(embeddingRaw);
+
+            if (!embedding || embedding.length === 0) {
+                console.warn(`⚠️ Empty embedding for ${file}, пропускаем.`);
+                continue;
+            }
+
             embeddings[file] = embedding;
             console.log(`✅ Embedded ${file} (length: ${embedding.length})`);
         } catch (err) {
@@ -75,9 +74,7 @@ async function main() {
         }
     }
 
-    // ----------------------
-    // Загружаем в Chroma Cloud
-    // ----------------------
+    // Загрузка в Chroma Cloud
     if (CHROMA_API_KEY && CHROMA_TENANT && CHROMA_DATABASE) {
         try {
             console.log("⏳ Подключаемся к Chroma Cloud...");
@@ -89,7 +86,7 @@ async function main() {
 
             const collection = await getOrCreateCollection(client, COLLECTION_NAME);
             if (!collection) {
-                console.warn("⚠️ Коллекция недоступна. Пропускаем загрузку.");
+                console.warn("⚠️ Коллекция недоступна. Пропускаем загрузку в Chroma Cloud.");
                 return;
             }
 
@@ -116,11 +113,4 @@ async function main() {
 }
 
 main().catch(err => console.error("💥 Fatal error:", err));
-
-
-
-
-
-
-
 
