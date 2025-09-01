@@ -12,7 +12,7 @@ const CHROMA_DATABASE = process.env.CHROMA_DATABASE || '';
 const COLLECTION_NAME = "FullProjectCollection";
 const MAX_CHUNK_LENGTH = 1000; // символов на блок
 const MAX_EMBED_DIM = 3072;    // лимит для Chroma Starter
-const ALLOWED_EXTENSIONS = ['.js', '.ts', '.go', '.groovy', '.html', '.css', '.md'];
+const ALLOWED_EXTENSIONS = ['.js', '.ts', '.go', '.groovy', '.java', '.html', '.css', '.md'];
 const EXCLUDED_FOLDERS = ['node_modules', 'target', 'dist', '.git'];
 
 // ======= UTILS =======

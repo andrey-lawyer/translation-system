@@ -1,0 +1,10 @@
+{
+  "name": "issue-analyzer",
+  "version": "1.0.0",
+  "type": "module",
+  "dependencies": {
+    "@xenova/transformers": "^0.0.1",
+    "chromadb": "^0.3.0",
+    "@octokit/rest": "^19.0.7"
+  }
+}

@@ -1,0 +1,41 @@
+name: Auto Fix Issue
+
+on:
+  issues:
+    types: [opened]
+
+permissions:
+  contents: write  # Required to create branches and PRs
+  pull-requests: write  # Required to create PRs
+
+jobs:
+  auto-fix:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10  # Prevent hanging jobs
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v3
+        with:
+          fetch-depth: 0  # Required for git operations
+
+      - name: Setup Node
+        uses: actions/setup-node@v3
+        with:
+          node-version: 20
+          cache: 'npm'
+
+      - name: Install dependencies
+        working-directory: ./.github/actions/issue-analyzer
+        run: npm ci
+
+      - name: Run Issue Analyzer
+        env:
+          CHROMA_API_KEY: ${{ secrets.CHROMA_API_KEY }}
+          CHROMA_TENANT: ${{ secrets.CHROMA_TENANT }}
+          CHROMA_DATABASE: ${{ secrets.CHROMA_DATABASE }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          ISSUE_BODY: ${{ github.event.issue.body }}
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+        working-directory: ./.github/actions/issue-analyzer
+        run: node index.js
