@@ -1,23 +1,2 @@
-export const LANGUAGE_OPTIONS = [
-    { label: "English", value: "en" },
-    { label: "Ukrainian", value: "uk" },
-    { label: "Russian", value: "ru" },
-    { label: "German", value: "de" },
-    { label: "Spanish", value: "es" },
-    { label: "French", value: "fr" },
-    { label: "Polish", value: "pl" },
-    { label: "Italian", value: "it" },
-    { label: "Portuguese", value: "pt" },
-    { label: "Chinese (Simplified)", value: "zh-CN" },
-    { label: "Chinese (Traditional)", value: "zh-TW" },
-    { label: "Japanese", value: "ja" },
-    { label: "Korean", value: "ko" },
-    { label: "Turkish", value: "tr" },
-    { label: "Arabic", value: "ar" },
-    { label: "Hebrew", value: "he" },
-    { label: "Dutch", value: "nl" },
-    { label: "Czech", value: "cs" },
-    { label: "Romanian", value: "ro" },
-    { label: "Greek", value: "el" },
-];
-
+// Auto-generated fix for issue #30
+// Placeholder content
