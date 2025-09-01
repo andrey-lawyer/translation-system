@@ -101,32 +101,42 @@ async function main() {
         const results = await withRetry(async () => {
             const res = await collection.query({
                 queryEmbeddings: [issueEmbedding],
-                nResults: 5
+                nResults: 5,
+                include: ["metadatas", "distances"], // documents не нужны
             });
-            console.log("Raw query results:", JSON.stringify(res, null, 2)); // <-- вот этот лог
+
+            if (!res || !res.metadatas || res.metadatas.length === 0) {
+                throw new Error("No results from Chroma");
+            }
+
             return res;
         });
 
-// Проверяем результат
-        if (!results) {
-            console.log("No results returned from query");
-        } else {
-            const { ids, metadatas, documents } = results;
+        const metadatas = results.metadatas[0]; // первый результат batch
+        const distances = results.distances?.[0];
 
-            console.log("ids:", ids);
-            console.log("documents:", documents);
-            console.log("metadatas:", metadatas);
+        console.log("✅ Found relevant chunks:");
 
-            if (!metadatas || metadatas.length === 0) {
-                console.log("No relevant chunks found.");
-            } else {
-                console.log("✅ Found relevant chunks:");
-                metadatas.forEach((meta, idx) => {
-                    const file = meta?.file || "unknown";
-                    const chunkId = meta?.chunkId ?? "unknown";
-                    console.log(`- [${file} | chunk ${chunkId}]`);
-                });
+        for (let i = 0; i < metadatas.length; i++) {
+            const meta = metadatas[i];
+            const file = meta?.file;
+            const chunkId = meta?.chunkId ?? 0;
+            let chunkText = "[text not available]";
+
+            if (file) {
+                try {
+                    const content = await fs.readFile(path.resolve(file), "utf-8");
+                    const chunkSize = 1000; // такой же, как при загрузке
+                    const start = chunkId * chunkSize;
+                    const end = start + chunkSize;
+                    chunkText = content.slice(start, end).replace(/\n/g, "\\n");
+                } catch (err) {
+                    console.warn(`Failed to read chunk ${chunkId} from ${file}:`, err.message);
+                }
             }
+
+            const distance = distances?.[i]?.toFixed(2) ?? "n/a";
+            console.log(`- [${file} | chunk ${chunkId} | distance: ${distance}] -> ${chunkText}`);
         }
 
     } catch (err) {
