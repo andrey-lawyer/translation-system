@@ -16,14 +16,11 @@ const ALLOWED_EXTENSIONS = ['.js', '.ts', '.go', '.groovy', '.java', '.html', '.
 const EXCLUDED_FOLDERS = ['node_modules', 'target', 'dist', '.git'];
 
 // ======= UTILS =======
-
-// Создание короткого уникального ID для Chroma
 function makeId(file, chunkId) {
     const hash = crypto.createHash('sha256').update(file).digest('hex').slice(0, 12);
     return `${hash}_p${chunkId}`;
 }
 
-// Разбиваем текст на чанки
 function splitText(text, maxLength) {
     const chunks = [];
     for (let i = 0; i < text.length; i += maxLength) {
@@ -32,25 +29,21 @@ function splitText(text, maxLength) {
     return chunks;
 }
 
-// Уменьшаем размерность эмбеддинга до лимита
 function resizeEmbedding(embedding, maxDim = MAX_EMBED_DIM) {
     if (embedding.length <= maxDim) return embedding;
     const factor = embedding.length / maxDim;
     const resized = [];
     for (let i = 0; i < maxDim; i++) {
-        const idx = Math.floor(i * factor);
-        resized.push(embedding[idx]);
+        resized.push(embedding[Math.floor(i * factor)]);
     }
     return resized;
 }
 
-// Рекурсивно собираем все файлы с нужными расширениями, исключая папки
 async function getFiles(dir) {
     let results = [];
     const entries = await fs.readdir(dir, { withFileTypes: true });
     for (const entry of entries) {
         if (EXCLUDED_FOLDERS.includes(entry.name)) continue;
-
         const fullPath = path.join(dir, entry.name);
         if (entry.isDirectory()) {
             results = results.concat(await getFiles(fullPath));
@@ -73,12 +66,13 @@ async function main() {
     });
     console.log("Модель загружена ✅");
 
-    const projectRoot = path.resolve('./'); // корень проекта
+    const projectRoot = path.resolve('./');
     const filesToVectorize = await getFiles(projectRoot);
     console.log(`Найдено файлов для векторизации: ${filesToVectorize.length}`);
 
     const embeddingsMap = {};
 
+    // Векторизация всех файлов
     for (const file of filesToVectorize) {
         try {
             const text = await fs.readFile(file, 'utf-8');
@@ -102,59 +96,81 @@ async function main() {
                 }
 
                 const resized = resizeEmbedding(embedding);
-                embeddingsMap[file].push({ chunkId: i, embedding: resized });
-                console.log(`Chunk ${i} of ${file} embedded (length: ${resized.length})`);
+                embeddingsMap[file].push({ chunkId: i, embedding: resized, text: chunk });
             }
         } catch (err) {
             console.error(`❌ Failed processing ${file}:`, err);
         }
     }
 
-    if (CHROMA_API_KEY && CHROMA_TENANT && CHROMA_DATABASE) {
-        try {
-            console.log("Connecting to Chroma Cloud...");
-            const client = new CloudClient({
-                apiKey: CHROMA_API_KEY,
-                tenant: CHROMA_TENANT,
-                database: CHROMA_DATABASE,
-            });
-
-            // Получаем или создаём коллекцию
-            let collection;
-            try {
-                collection = await client.getCollection({ name: COLLECTION_NAME });
-                console.log("Коллекция найдена:", collection.name, collection.id);
-            } catch {
-                collection = await client.createCollection({ name: COLLECTION_NAME });
-                console.log("Коллекция создана:", collection.name, collection.id);
-            }
-
-            // Пушим эмбеддинги
-            for (const [file, chunks] of Object.entries(embeddingsMap)) {
-                for (const { chunkId, embedding } of chunks) {
-                    try {
-                        await collection.add({
-                            ids: [makeId(file, chunkId)],
-                            embeddings: [embedding],
-                            metadatas: [{ file, chunkId }],
-                        });
-                        console.log(`✅ Pushed ${file} part ${chunkId} to Chroma Cloud`);
-                    } catch (err) {
-                        console.error(`❌ Failed to push ${file} part ${chunkId}:`, err.message);
-                    }
-                }
-            }
-        } catch (err) {
-            console.error("Chroma Cloud connection failed:", err.message);
-        }
-    } else {
+    if (!CHROMA_API_KEY || !CHROMA_TENANT || !CHROMA_DATABASE) {
         console.log("Chroma Cloud credentials not provided, пропускаем upload.");
+        return;
     }
 
+    // ======= Upload to Chroma =======
+    console.log("Connecting to Chroma Cloud...");
+    const client = new CloudClient({
+        apiKey: CHROMA_API_KEY,
+        tenant: CHROMA_TENANT,
+        database: CHROMA_DATABASE,
+    });
+
+    let collection;
+    try {
+        collection = await client.getCollection({ name: COLLECTION_NAME });
+        console.log("Коллекция найдена:", collection.name);
+    } catch {
+        collection = await client.createCollection({ name: COLLECTION_NAME });
+        console.log("Коллекция создана:", collection.name);
+    }
+
+    for (const [file, chunks] of Object.entries(embeddingsMap)) {
+        for (const { chunkId, embedding, text } of chunks) {
+            try {
+                await collection.add({
+                    ids: [makeId(file, chunkId)],
+                    embeddings: [embedding],
+                    metadatas: [{ file, chunkId, text }],
+                });
+            } catch (err) {
+                console.error(`❌ Failed to push ${file} part ${chunkId}:`, err.message);
+            }
+        }
+    }
     console.log("Vectorization complete ✅");
+
+    // ======= Semantic Search Example =======
+    const ISSUE_BODY = "In App.js, inside function App(), add console.log('App renders') at the top of the function body.";
+
+    console.log("Vectorizing issue text...");
+    const issueEmbeddingOutput = await embedder(ISSUE_BODY);
+    let issueEmbedding;
+    if (issueEmbeddingOutput && 'data' in issueEmbeddingOutput) {
+        issueEmbedding = Array.from(issueEmbeddingOutput.data);
+    } else if (Array.isArray(issueEmbeddingOutput)) {
+        issueEmbedding = issueEmbeddingOutput.flat(Infinity);
+    }
+    issueEmbedding = resizeEmbedding(issueEmbedding);
+
+    console.log("Querying Chroma for relevant chunks...");
+    const results = await collection.query({
+        queryEmbeddings: [issueEmbedding],
+        nResults: 5,
+        include: ["metadatas", "distances", "documents"]
+    });
+
+    console.log("✅ Top relevant chunks:");
+    for (let i = 0; i < results.metadatas[0].length; i++) {
+        const meta = results.metadatas[0][i];
+        const distance = results.distances?.[0][i]?.toFixed(3) ?? "n/a";
+        console.log(`- File: ${meta.file}, chunk: ${meta.chunkId}, distance: ${distance}`);
+        console.log(`  Text snippet: ${meta.text.slice(0, 200).replace(/\n/g, ' ')}...`);
+    }
 }
 
 main().catch(err => console.error("Fatal error:", err));
+
 
 
 
